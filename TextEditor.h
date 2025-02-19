@@ -58,6 +58,7 @@ public:
 	inline bool IsCompletingPairedGlyphs() const { return completePairedGlyphs; }
 	inline void SetOverwriteEnabled(bool value) { overwrite = value; }
 	inline bool IsOverwriteEnabled() const { return overwrite; }
+	inline void RequestFocus() { focusOnEditor = true; }
 
 	// access text (using UTF-8 encoded strings)
 	inline void SetText(const std::string_view& text) { setText(text); }

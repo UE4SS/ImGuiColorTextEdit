@@ -81,6 +81,7 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 		ImGui::SetNextWindowFocus();
 		if (frame_counter >= 2) {
 			focusOnEditor = false;
+			frame_counter = 0;
 		}
 		++frame_counter;
 	}
