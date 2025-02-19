@@ -76,9 +76,13 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
 
 	// ensure editor has focus (if required)
+	static size_t frame_counter{};
 	if (focusOnEditor) {
 		ImGui::SetNextWindowFocus();
-		focusOnEditor = false;
+		if (frame_counter >= 2) {
+			focusOnEditor = false;
+		}
+		++frame_counter;
 	}
 
 	// start a new child window
