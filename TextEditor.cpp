@@ -762,8 +762,8 @@ void TextEditor::handleKeyboardInputs() {
 	#endif
 
 		// cursor movements and selections
-		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { moveUp(1, shift); }
-		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow)) { moveDown(1, shift); }
+		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveUp(1, shift); }
+		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveDown(1, shift); }
 
 #if __APPLE__
 		else if (isCtrlShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { shrinkSelectionsToCurlyBrackets(true); }
@@ -821,9 +821,9 @@ void TextEditor::handleKeyboardInputs() {
 		else if (isNoModifiers && ImGui::IsKeyPressed(ImGuiKey_Insert)) { overwrite = !overwrite; }
 
 		// handle new line
-		else if (!readOnly && isNoModifiers && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) { handleCharacter('\n'); }
-		else if (!readOnly && isShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) { insertLineBelow(); }
-		else if (!readOnly && isShiftShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) { insertLineAbove(); }
+		else if (!readOnly && isNoModifiers && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { handleCharacter('\n'); }
+		else if (!readOnly && isShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { insertLineBelow(); }
+		else if (!readOnly && isShiftShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { insertLineAbove(); }
 
 		// handle tabs
 		else if (!readOnly && isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_Tab)) {
