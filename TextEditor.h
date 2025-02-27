@@ -63,12 +63,28 @@ public:
 	// access text (using UTF-8 encoded strings)
 	// (see note below on cursor and scroll manipulation after setting new text)
 	inline void SetText(const std::string_view& text) { setText(text); }
-	inline std::string GetText() { return document.getText(); }
+	inline std::string GetText() const { return document.getText(); }
+	inline std::string GetCursorText(size_t cursor) const { return getCursorText(cursor); }
+
+	inline std::string GetLineText(int line) const {
+		return (line < 0 || line > static_cast<int>(document.size())) ? "" : document.getLineText(line);
+	}
+
+	inline std::string GetSectionText(int startLine, int startColumn, int endLine, int endColumn) const {
+		return document.getSectionText(
+			document.normalizeCoordinate(Coordinate(startLine, startColumn)),
+			document.normalizeCoordinate(Coordinate(endLine, endColumn)));
+	}
+
 	inline bool IsEmpty() const { return document.size() == 1 && document[0].size() == 0; }
 	inline int GetLineCount() const { return document.lineCount(); }
 
+
 	// render the text editor in a Dear ImGui context
 	inline void Render(const char* title, const ImVec2& size=ImVec2(), bool border=false) { render(title, size, border); }
+
+	// programmatically set focus on the editor
+	inline void SetFocus() { focusOnEditor = true; }
 
 	// clipboard actions
 	inline void Cut() { if (!readOnly) cut(); }
@@ -85,6 +101,14 @@ public:
 	inline void SelectAll() { selectAll(); }
 	inline void SelectLine(int line) { if (line >= 0 && line < document.lineCount()) selectLine(line); }
 	inline void SelectLines(int start, int end) { if (start >= 0 && end < document.lineCount() && start <= end) selectLines(start, end); }
+
+	inline void SelectRegion(int startLine, int startColumn, int endLine, int endColumn) {
+		selectRegion(startLine, startColumn, endLine, endColumn);
+	}
+
+	inline void SelectToBrackets(bool includeBrackets=true) { selectToBrackets(includeBrackets); }
+	inline void GrowSelectionsToCurlyBrackets(bool includeBrackets=true) { growSelectionsToCurlyBrackets(includeBrackets); }
+	inline void ShrinkSelectionsToCurlyBrackets(bool includeBrackets=true) { growSelectionsToCurlyBrackets(includeBrackets); }
 	inline void AddNextOccurrence() { addNextOccurrence(); }
 	inline void SelectAllOccurrences() { selectAllOccurrences(); }
 	inline bool AnyCursorHasSelection() const { return cursors.anyHasSelection(); }
@@ -95,6 +119,7 @@ public:
 	// get cursor positions (the meaning of main and current is explained in README.md)
 	inline size_t GetNumberOfCursors() const { return cursors.size(); }
 	inline void GetCursor(int& line, int& column, size_t cursor) const { return getCursor(line, column, cursor); }
+	inline void GetCursor(int& startLine, int& startColumn, int& endLine, int& endColumn, size_t cursor) const { return getCursor(startLine, startColumn, endLine, endColumn, cursor); }
 	inline void GetMainCursor(int& line, int& column) const { return getCursor(line, column, cursors.getMainIndex()); }
 	inline void GetCurrentCursor(int& line, int& column) const { return getCursor(line, column, cursors.getCurrentIndex()); }
 
@@ -284,6 +309,9 @@ public:
 		// name of the language
 		std::string name;
 
+		// flag to describe if keywords and identifiers are case sensitive (which is the default)
+		bool caseSensitive = true;
+
 		// the character that starts a preprocessor directive (can be 0 if language doesn't have this feature)
 		ImWchar preprocess = 0;
 
@@ -313,6 +341,7 @@ public:
 		ImWchar stringEscape = 0;
 
 		// set of keywords, declarations, identifiers used in the language (can be blank if language doesn't have these features)
+		// if language is not case sensitive, all entries should be in lower case
 		std::unordered_set<std::string> keywords;
 		std::unordered_set<std::string> declarations;
 		std::unordered_set<std::string> identifiers;
@@ -343,6 +372,7 @@ public:
 		static const Language* Hlsl();
 		static const Language* Json();
 		static const Language* Markdown();
+		static const Language* Sql();
 	};
 
 	inline void SetLanguage(const Language* l) { language = l; languageChanged = true; }
@@ -462,6 +492,9 @@ private:
 		// constructor
 		Cursors() { clearAll(); }
 
+		// reset the cursors
+		void reset();
+
 		// erase all cursors and specify a new one
 		inline void setCursor(Coordinate coordinate) { setCursor(coordinate, coordinate); }
 		void setCursor(Coordinate start, Coordinate end);
@@ -570,8 +603,9 @@ private:
 
 		// access document text (strings are UTF-8 encoded)
 		std::string getText() const;
-		std::string getSectionText(Coordinate start, Coordinate end) const;
 		std::string getLineText(int line) const;
+		std::string getSectionText(Coordinate start, Coordinate end) const;
+		ImWchar getCodePoint(Coordinate location);
 
 		// get number of lines (as an int)
 		inline int lineCount() const { return static_cast<int>(size()); }
@@ -662,6 +696,9 @@ private:
 	// transaction list to support do/undo/redo
  	class Transactions : public std::vector<std::shared_ptr<Transaction>> {
 	public:
+		// reset the transactions
+		void reset();
+
 		// create a new transaction
 		static inline std::shared_ptr<Transaction> create() { return std::make_shared<Transaction>(); }
 
@@ -704,9 +741,9 @@ private:
 	} colorizer;
 
 	// details about bracketed text
-	class Bracket {
+	class BracketPair {
 	public:
-		Bracket(ImWchar sc, Coordinate s, ImWchar ec, Coordinate e, int l) : startChar(sc), start(s), endChar(ec), end(e), level(l) {}
+		BracketPair(ImWchar sc, Coordinate s, ImWchar ec, Coordinate e, int l) : startChar(sc), start(s), endChar(ec), end(e), level(l) {}
 		ImWchar startChar;
 		Coordinate start;
 		ImWchar endChar;
@@ -714,10 +751,10 @@ private:
 		int level;
 
 		inline bool isAfter(Coordinate location) const { return start > location; }
-		inline bool isAround(Coordinate location) const { return start <= location && end >= location; }
+		inline bool isAround(Coordinate location) const { return start < location && end >= location; }
 	};
 
-	class Bracketeer : public std::vector<Bracket> {
+	class Bracketeer : public std::vector<BracketPair> {
 	public:
 		// reset the bracketeer
 		void reset();
@@ -725,10 +762,11 @@ private:
 		// update the list of bracket pairs in the document and colorize the relevant glyphs
 		void update(Document& document);
 
-		// manage active brackets
-		iterator getActiveBracket(Coordinate location);
+		// find relevant brackets
+		iterator getEnclosingBrackets(Coordinate location);
+		iterator getEnclosingCurlyBrackets(Coordinate location);
+		iterator getInnerCurlyBrackets(Coordinate location);
 
-	private:
 		// utility functions
 		static inline bool isBracketCandidate(Glyph& glyph) {
 			return glyph.color == Color::punctuation ||
@@ -742,12 +780,9 @@ private:
 		static inline bool isBracketCloser(ImWchar ch) { return ch == '}' || ch == ']' || ch == ')'; }
 		static inline ImWchar toBracketCloser(ImWchar ch) { return ch == '{' ? '}' : (ch == '[' ? ']' : (ch == '(' ? ')' : ch)); }
 		static inline ImWchar toBracketOpener(ImWchar ch) { return ch == '}' ? '{' : (ch == ']' ? '[' : (ch == ')' ? '(' : ch)); }
-
-		int active = -1;
-		Coordinate activeLocation = Coordinate::invalid();
 	} bracketeer;
 
-	// set the editor's text
+	// access the editor's text
 	void setText(const std::string_view& text);
 
 	// render (parts of) the text editor
@@ -770,16 +805,21 @@ private:
 	void selectAll();
 	void selectLine(int line);
 	void selectLines(int startLine, int endLine);
+	void selectRegion(int startLine, int startColumn, int endLine, int endColumn);
+	void selectToBrackets(bool includeBrackets);
+	void growSelectionsToCurlyBrackets(bool includeBrackets);
+	void shrinkSelectionsToCurlyBrackets(bool includeBrackets);
 
-	// clipboard actions
 	void cut();
 	void copy() const;
 	void paste();
 	void undo();
 	void redo();
 
-	// access cursor location
+	// access cursor locations
 	void getCursor(int& line, int& column, size_t cursor) const;
+	void getCursor(int& startLine, int& startColumn, int& endLine, int& endColumn, size_t cursor) const;
+	std::string	getCursorText(size_t cursor) const;
 
 	// scrolling support
 	void makeCursorVisible();

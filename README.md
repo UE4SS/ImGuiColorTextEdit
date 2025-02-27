@@ -1,4 +1,19 @@
+<div align="center">
+
+![MacOS status](https://img.shields.io/github/actions/workflow/status/goossens/ImGuiColorTextEdit/macos.yml?branch=master&label=MacOS&style=for-the-badge)
+![Linux status](https://img.shields.io/github/actions/workflow/status/goossens/ImGuiColorTextEdit/linux.yml?branch=master&label=Linux&style=for-the-badge)
+![Windows status](https://img.shields.io/github/actions/workflow/status/goossens/ImGuiColorTextEdit/windows.yml?branch=master&label=Windows&style=for-the-badge)
+<br/>
+![Repo size](https://img.shields.io/github/repo-size/goossens/ImGuiColorTextEdit?style=for-the-badge)
+![Repo activity](https://img.shields.io/github/commit-activity/m/goossens/ImGuiColorTextEdit?label=Commits&style=for-the-badge)
+<br/>
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+![Maintained](https://img.shields.io/maintenance/yes/2025?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.9-blue?style=for-the-badge)
+
 # ImGuiColorTextEdit
+
+</div>
 
 ImGuiTextEdit is a syntax highlighting text editor for
 [Dear ImGui](https://github.com/ocornut/imgui) and it was originally developed by
@@ -86,11 +101,13 @@ Dear ImGui context by doing the following:
 - Call the TextEditor's Render member function every frame in your Dear ImGui loop.
 - If you plan to use non-ASCII characters in your text, see the Unicode section below.
 - Configure Dear ImGui's clipboard functions since that is what this editor uses.
+- For a complete example, please see the [example folder](example/);
 
 ## Default Keyboard and Mouse Mappings
 
 - In the mappings listed below, the following modifier keys are used:
-	- Ctrl: this refers to the Command Key on MacOS and the Control key on Linux and Windows.
+	- Super: this refers to the Control key on MacOS (Dear ImGui reverses Command and Control key on that platform).
+	- Ctrl: this refers to the Command key on MacOS and the Control key on Linux and Windows.
 	- Alt: this refers to the Option key on MacOS and the Alt key on Linux and Windows.
 	- Shift: as you would expect on all platforms.
 	- If a keyboard has a left and right version of these modifiers, the meaning is not different.
@@ -102,16 +119,20 @@ Dear ImGui context by doing the following:
 	- Ctrl-UpArrow and Ctrl-DownArrow move to the start/end of the document.
 	- Home and End keys move to the start/end of the line.
 	- Holding down the Shift key extends the current selection(s).
-	- Holding down the Alt key with the left or right arrow moves a whole word.
+	- Holding down the Alt key with the left or right arrow moves a whole word on MacOS.
+	- Holding down the Ctrl key with the left or right arrow moves a whole word on Linux and Windows.
 
 - Cursors and selections:
 	- Alt with single left mouse click creates a new cursor on MacOS.
 	- Ctrl with single left mouse click creates a new cursor on Linux and Windows.
 	- Ctrl-A select all text.
 	- Ctrl-D creates a new cursor and selects the next instance of the current selection.
-	- Double left mouse clicks select a word. Shift extends current selection.
-	- Triple left mouse clicks select a line. Shift extends current selection.
+	- Double left mouse clicks on a bracket or parenthesis selects the contents including the brackets.
+	- Double left mouse clicks not on a bracket or parenthesis, selects a word. Shift extends current selection.
+	- Triple left mouse clicks selects a line. Shift extends current selection.
 	- Dragging mouse with left mouse button selects text. Shift extends current selection.
+	- Alt-Shift-RightArrow (on MacOS) and Ctrl-Shift-RightArrow (on Linux and Windows) grows the selection to the next codeblock.
+	- Alt-Shift-LeftArrow (on MacOS) and Ctrl-Shift-LeftArrow (on Linux and Windows) shrinks the selection to the next codeblock.
 
 - Clipboard Operations:
 	- Ctrl-X or Shift-Delete cuts selected text or current line if no selection.

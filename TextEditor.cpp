@@ -28,7 +28,7 @@
 void TextEditor::setText(const std::string_view &text) {
 	// load text into document and reset subsystems
 	document.setText(text);
-	transactions.clear();
+	transactions.reset();
 	bracketeer.reset();
 	cursors.clearAll();
 	makeCursorVisible();
@@ -168,7 +168,7 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	// start a new child window
 	// this must be done before we handle keyboard and mouse interactions to ensure correct ImGui context
 	ImGui::SetNextWindowContentSize(totalSize);
-	ImGui::BeginChild(title, size, border, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoNavInputs);
+	ImGui::BeginChild(title, size, border, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoNavInputs);
 
 	// handle keyboard and mouse inputs
 	handleKeyboardInputs();
@@ -345,7 +345,7 @@ void TextEditor::renderMatchingBrackets() {
 			}
 
 			// render active bracket pair
-			auto active = bracketeer.getActiveBracket(cursors.getMain().getInteractiveEnd());
+			auto active = bracketeer.getEnclosingBrackets(cursors.getMain().getInteractiveEnd());
 
 			if (active != bracketeer.end() &&
 				active->start.line <= lastVisibleLine &&
@@ -747,13 +747,33 @@ void TextEditor::handleKeyboardInputs() {
 		auto isShiftOnly = !ctrl && shift && !alt;
 		auto isOptionalShift = !ctrl && !alt;
 		auto isOptionalAlt = !ctrl && !shift;
+
+#if __APPLE__
+		// Dear ImGui switches the Cmd(Super) and Ctrl keys on MacOS
+		auto super = ImGui::IsKeyDown(ImGuiMod_Super);
+		auto isCtrlShift = !ctrl && shift && !alt && super;
 		auto isOptionalAltShift = !ctrl;
+	#else
+		auto isShiftAlt = !ctrl && shift && alt;
+		auto isOptionalCtrlShift = !alt;
+	#endif
 
 		// cursor movements and selections
 		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { moveUp(1, shift); }
 		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow)) { moveDown(1, shift); }
+
+#if __APPLE__
+		else if (isCtrlShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { shrinkSelectionsToCurlyBrackets(true); }
+		else if (isCtrlShift && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { growSelectionsToCurlyBrackets(true); }
+		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { moveLeft(shift, alt); }
+		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { moveRight(shift, alt); }
+#else
+		else if (isShiftAlt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { shrinkSelectionsToCurlyBrackets(true); }
+		else if (isShiftAlt && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { growSelectionsToCurlyBrackets(true); }
 		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { moveLeft(shift, ctrl); }
 		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { moveRight(shift, ctrl); }
+#endif
+
 		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_PageUp)) { moveUp(visibleLines - 2, shift); }
 		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_PageDown)) { moveDown(visibleLines - 2, shift); }
 		else if (isOptionalShiftShortcut && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { moveToTop(shift); }
@@ -850,7 +870,11 @@ void TextEditor::handleMouseInteractions() {
 			static_cast<int>(std::floor(mousePos.y / glyphSize.y)),
 			static_cast<int>(std::round((mousePos.x - textOffset) / glyphSize.x))));
 
-		// show text cursor if required
+		auto mouseCoordAbs = document.normalizeCoordinate(Coordinate(
+			static_cast<int>(std::floor(mousePos.y / glyphSize.y)),
+			static_cast<int>(std::floor((mousePos.x - textOffset) / glyphSize.x))));
+
+				// show text cursor if required
 		if (ImGui::IsWindowFocused() && overText) {
 			ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
 		}
@@ -881,12 +905,12 @@ void TextEditor::handleMouseInteractions() {
 		} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
 			// handle right clicks by setting up context menu (if required)
 			if (overLineNumbers && lineNumberContextMenuCallback) {
-				contextMenuLine = mouseCoord.line;
+				contextMenuLine = mouseCoordAbs.line;
 				ImGui::OpenPopup("LineNumberContextMenu");
 
 			} else if (overText && textContextMenuCallback) {
-				contextMenuLine = mouseCoord.line;
-				contextMenuColumn = mouseCoord.column;
+				contextMenuLine = mouseCoordAbs.line;
+				contextMenuColumn = mouseCoordAbs.column;
 				ImGui::OpenPopup("TextContextMenu");
 			}
 
@@ -912,9 +936,33 @@ void TextEditor::handleMouseInteractions() {
 			} else if (doubleClick) {
 				// left mouse button double click
 				if (overText) {
-					auto start = document.findWordStart(mouseCoord);
-					auto end = document.findWordEnd(mouseCoord);
-					cursors.updateCurrentCursor(start, end);
+					auto codepoint = document.getCodePoint(mouseCoordAbs);
+					bool handled = false;
+
+					// select bracketed section (if required)
+					if (Bracketeer::isBracketOpener(codepoint)) {
+						auto brackets = bracketeer.getEnclosingBrackets(document.getRight(mouseCoordAbs));
+
+						if (brackets != bracketeer.end()) {
+							cursors.setCursor(brackets->start, document.getRight(brackets->end));
+							handled = true;
+						}
+
+					} else if (Bracketeer::isBracketCloser(codepoint)) {
+						auto brackets = bracketeer.getEnclosingBrackets(mouseCoordAbs);
+
+						if (brackets != bracketeer.end()) {
+							cursors.setCursor(brackets->start, document.getRight(brackets->end));
+							handled = true;
+						}
+					}
+
+					// select word if it wasn't a bracketed section
+					if (!handled) {
+						auto start = document.findWordStart(mouseCoordAbs);
+						auto end = document.findWordEnd(mouseCoordAbs);
+						cursors.updateCurrentCursor(start, end);
+					}
 				}
 
 			} else if (click) {
@@ -994,6 +1042,102 @@ void TextEditor::selectLines(int startLine, int endLine) {
 	Coordinate start{startLine, 0};
 	moveTo(start, false);
 	moveTo(document.getDown(start, endLine - startLine + 1), true);
+}
+
+
+//
+//	TextEditor::selectRegion
+//
+
+void TextEditor::selectRegion(int startLine, int startColumn, int endLine, int endColumn) {
+	auto start = document.normalizeCoordinate(Coordinate(startLine, startColumn));
+	auto end = document.normalizeCoordinate(Coordinate(endLine, endColumn));
+
+	if (end < start) {
+		std::swap(start, end);
+	}
+
+	cursors.setCursor(start, end);
+}
+
+
+//
+//	TextEditor::selectToBrackets
+//
+
+void TextEditor::selectToBrackets(bool includeBrackets) {
+	if (!showMatchingBrackets) {
+		bracketeer.update(document);
+	}
+
+	for (auto& cursor : cursors) {
+		auto bracket = bracketeer.getEnclosingBrackets(cursor.getSelectionStart());
+
+		if (bracket != bracketeer.end()) {
+			if (includeBrackets) {
+				cursor.update(bracket->start, document.getRight(bracket->end));
+
+			} else {
+				cursor.update(document.getRight(bracket->start), bracket->end);
+			}
+		}
+	}
+}
+
+
+//
+//	TextEditor::growSelectionsToCurlyBrackets
+//
+
+void TextEditor::growSelectionsToCurlyBrackets(bool includeBrackets) {
+	if (!showMatchingBrackets) {
+		bracketeer.update(document);
+	}
+
+	for (auto& cursor : cursors) {
+		auto bracket = bracketeer.getEnclosingCurlyBrackets(cursor.getSelectionStart());
+
+		if (bracket != bracketeer.end()) {
+			if (includeBrackets) {
+				cursor.update(bracket->start, document.getRight(bracket->end));
+
+			} else {
+				cursor.update(document.getRight(bracket->start), bracket->end);
+			}
+		}
+	}
+}
+
+
+//
+//	TextEditor::shrinkSelectionsToCurlyBrackets
+//
+
+void TextEditor::shrinkSelectionsToCurlyBrackets(bool includeBrackets) {
+	if (!showMatchingBrackets) {
+		bracketeer.update(document);
+	}
+
+	for (auto& cursor : cursors) {
+		if (cursor.hasSelection()){
+			auto start = cursor.getSelectionStart();
+
+			if (document.getCodePoint(start) == '{') {
+				start = document.getRight(start);
+			}
+
+			auto bracket = bracketeer.getInnerCurlyBrackets(start);
+
+			if (bracket != bracketeer.end()) {
+				if (includeBrackets) {
+					cursor.update(bracket->start, document.getRight(bracket->end));
+
+				} else {
+					cursor.update(document.getRight(bracket->start), bracket->end);
+				}
+			}
+		}
+	}
 }
 
 
@@ -1093,6 +1237,31 @@ void TextEditor::getCursor(int& line, int& column, size_t cursor) const {
 	auto pos = cursors[cursor].getInteractiveEnd();
 	line = pos.line;
 	column = pos.column;
+}
+
+
+//
+//	TextEditor::getCursor
+//
+
+void TextEditor::getCursor(int& startLine, int& startColumn, int& endLine, int& endColumn, size_t cursor) const {
+	cursor = std::min(cursor, cursors.size() - 1);
+	auto start = cursors[cursor].getSelectionStart();
+	auto end = cursors[cursor].getSelectionEnd();
+	startLine = start.line;
+	startColumn = start.column;
+	endLine = end.line;
+	endColumn = end.column;
+}
+
+
+//
+//	TextEditor::getCursorText
+//
+
+std::string TextEditor::getCursorText(size_t cursor) const {
+	cursor = std::min(cursor, cursors.size() - 1);
+	return document.getSectionText(cursors[cursor].getSelectionStart(), cursors[cursor].getSelectionEnd());
 }
 
 
@@ -2342,16 +2511,25 @@ void TextEditor::Cursor::adjustForDelete(Coordinate deleteStart, Coordinate dele
 
 
 //
+//	TextEditor::Cursors::reset
+//
+
+void TextEditor::Cursors::reset() {
+	clear();
+	main = 0;
+	current = 0;
+}
+
+
+//
 //	TextEditor::Cursors::setCursor
 //
 
 void TextEditor::Cursors::setCursor(Coordinate cursorStart, Coordinate cursorEnd) {
-	clear();
+	reset();
 	emplace_back(cursorStart, cursorEnd);
 	front().setMain(true);
 	front().setCurrent(true);
-	main = 0;
-	current = 0;
 }
 
 
@@ -2417,12 +2595,10 @@ bool TextEditor::Cursors::anyHasUpdate() const {
 //
 
 void TextEditor::Cursors::clearAll() {
-	clear();
+	reset();
 	emplace_back(Coordinate(0, 0));
 	front().setMain(true);
 	front().setCurrent(true);
-	main = 0;
-	current = 0;
 }
 
 
@@ -2699,6 +2875,15 @@ std::string TextEditor::Document::getText() const {
 
 
 //
+//	TextEditor::Document::getLineText
+//
+
+std::string TextEditor::Document::getLineText(int line) const {
+	return getSectionText(Coordinate(line, 0), Coordinate(line, at(line).maxColumn));
+}
+
+
+//
 //	TextEditor::Document::getSectionText
 //
 
@@ -2729,11 +2914,18 @@ std::string TextEditor::Document::getSectionText(Coordinate start, Coordinate en
 
 
 //
-//	TextEditor::Document::getLineText
+//	TextEditor::Document::getCodePoint
 //
 
-std::string TextEditor::Document::getLineText(int line) const {
-	return getSectionText(Coordinate(line, 0), Coordinate(line, at(line).maxColumn));
+ImWchar TextEditor::Document::getCodePoint(Coordinate location) {
+	auto index = getIndex(location);
+
+	if (index < at(location.line).size()) {
+		return at(location.line)[index].codepoint;
+
+	} else {
+		return IM_UNICODE_CODEPOINT_INVALID;
+	}
 }
 
 
@@ -3127,6 +3319,16 @@ TextEditor::Coordinate TextEditor::Document::normalizeCoordinate(Coordinate coor
 
 
 //
+//	TextEditor::Transactions::reset
+//
+
+void TextEditor::Transactions::reset() {
+	clear();
+	undoIndex = 0;
+}
+
+
+//
 //	TextEditor::Transactions::add
 //
 
@@ -3275,7 +3477,14 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 					color = Color::identifier;
 
 					for (auto i = tokenStart; i < tokenEnd; i++) {
-						identifier += *i;
+						ImWchar codepoint = *i;
+
+						if (!language->caseSensitive) {
+							codepoint = CodePoint::toLower(codepoint);
+						}
+
+						char utf8[4];
+						identifier.append(utf8, CodePoint::write(utf8, codepoint));
 					}
 
 					if (language->keywords.find(identifier) != language->keywords.end()) {
@@ -3481,8 +3690,6 @@ bool TextEditor::Colorizer::matches(Line::iterator start, Line::iterator end, co
 
 void TextEditor::Bracketeer::reset() {
 	clear();
-	active = -1;
-	activeLocation = Coordinate::invalid();
 }
 
 
@@ -3510,7 +3717,7 @@ void TextEditor::Bracketeer::update(Document& document) {
 			if (isBracketCandidate(glyph) && isBracketOpener(glyph.codepoint)) {
 				// start a new level
 				levels.emplace_back(size());
-				emplace_back(glyph.codepoint, Coordinate(line, document.getColumn(line, index)), 0, Coordinate::invalid(), level);
+				emplace_back(glyph.codepoint, Coordinate(line, document.getColumn(line, index)), static_cast<ImWchar>(0), Coordinate::invalid(), level);
 				glyph.color = bracketColors[level % 3];
 				level++;
 
@@ -3554,30 +3761,75 @@ void TextEditor::Bracketeer::update(Document& document) {
 
 
 //
-//	TextEditor::Bracketeer::getActiveBracket
+//	TextEditor::Bracketeer::getEnclosingCurlyBrackets
 //
 
-TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getActiveBracket(Coordinate location) {
-	if (location != activeLocation) {
-		active = -1;
-		bool done = false;
+TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getEnclosingBrackets(Coordinate location) {
+	iterator brackets = end();
+	bool done = false;
 
-		for (auto i = begin(); !done && i < end(); i++) {
-			// skip pairs that start after specified location
-			if (i->isAfter(location)) {
-				done = true;
-			}
-
-			// brackets are active when they are around specified location
-			else if (i->isAround(location)) {
-				active = static_cast<int>(i - begin());
-			}
+	for (auto i = begin(); !done && i < end(); i++) {
+		// brackets are sorted so no need to go past specified location
+		if (i->isAfter(location)) {
+			done = true;
 		}
 
-		activeLocation = location;
+		else if (i->isAround(location)) {
+			// this could be what we're looking for
+			brackets = i;
+		}
 	}
 
-	return active == -1 ? end() : begin() + active;
+	return brackets;
+}
+
+
+//
+//	TextEditor::Bracketeer::getEnclosingCurlyBrackets
+//
+
+TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getEnclosingCurlyBrackets(Coordinate location) {
+	iterator brackets = end();
+	bool done = false;
+
+	for (auto i = begin(); !done && i < end(); i++) {
+		// brackets are sorted so no need to go past specified location
+		if (i->isAfter(location)) {
+			done = true;
+		}
+
+		else if (i->isAround(location) && i->startChar == '{') {
+			// this could be what we're looking for
+			brackets = i;
+		}
+	}
+
+	return brackets;
+}
+
+
+//
+//	TextEditor::Bracketeer::getInnerCurlyBrackets
+//
+
+TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getInnerCurlyBrackets(Coordinate location) {
+	auto brackets = getEnclosingCurlyBrackets(location);
+
+	if (brackets != end()) {
+		bool done = false;
+
+		for (auto next = brackets + 1; next < end() && !done; next++) {
+			 if (next->level == brackets->level + 1 && next->startChar == '{') {
+				brackets = next;
+				done = true;
+
+			} else if (next->level <= brackets->level) {
+				done = true;
+			 }
+		}
+	}
+
+	return brackets;
 }
 
 
@@ -7966,6 +8218,76 @@ const TextEditor::Language* TextEditor::Language::Markdown() {
 		language.commentEnd = "-->";
 
 		language.customTokenizer = tokenizeMarkdown;
+		initialized = true;
+	}
+
+	return &language;
+}
+
+
+//
+//	TextEditor::Language::Sql
+//
+
+const TextEditor::Language* TextEditor::Language::Sql() {
+	static bool initialized = false;
+	static TextEditor::Language language;
+
+	if (!initialized) {
+		language.name = "SQL";
+		language.caseSensitive = false;
+		language.singleLineComment = "--";
+		language.commentStart = "/*";
+		language.commentEnd = "*/";
+		language.hasSingleQuotedStrings = true;
+		language.hasDoubleQuotedStrings = true;
+		language.stringEscape = '\\';
+
+		static const char* const keywords[] = {
+			"abs", "absent", "acos", "all", "allocate", "alter", "and", "any", "any_value", "are", "array", "array_agg",
+			"array_max_cardinality", "as", "asensitive", "asin", "asymmetric", "at", "atan", "atomic", "authorization",
+			"avg", "begin", "begin_frame", "begin_partition", "between", "bigint", "binary", "blob", "boolean", "both",
+			"btrim", "by", "call", "called", "cardinality", "cascaded", "case", "cast", "ceil", "ceiling", "char",
+			"character", "character_length", "char_length", "check", "classifier", "clob", "close", "coalesce", "collate",
+			"collect", "column", "commit", "condition", "connect", "constraint", "contains", "convert", "copy", "corr",
+			"corresponding", "cos", "cosh", "count", "covar_pop", "covar_samp", "create", "cross", "cube", "cume_dist",
+			"current", "current_catalog", "current_date", "current_default_transform_group", "current_path", "current_role",
+			"current_row", "current_schema", "current_time", "current_timestamp", "current_transform_group_for_type",
+			"current_user", "cursor", "cycle", "date", "day", "deallocate", "dec", "decfloat", "decimal", "declare",
+			"default", "define", "delete", "dense_rank", "deref", "describe", "deterministic", "disconnect", "distinct",
+			"double", "drop", "dynamic", "each", "element", "else", "empty", "end", "end-exec", "end_frame", "end_partition",
+			"equals", "escape", "every", "except", "exec", "execute", "exists", "exp", "external", "extract", "false", "fetch",
+			"filter", "first_value", "float", "floor", "for", "foreign", "frame_row", "free", "from", "full", "function",
+			"fusion", "get", "global", "grant", "greatest", "group", "grouping", "groups", "having", "hold", "hour",
+			"identity", "in", "indicator", "initial", "inner", "inout", "insensitive", "insert", "int", "integer",
+			"intersect", "intersection", "interval", "into", "is", "join", "json", "json_array", "json_arrayagg",
+			"json_exists", "json_object", "json_objectagg", "json_query", "json_scalar", "json_serialize", "json_table",
+			"json_table_primitive", "json_value", "lag", "language", "large", "last_value", "lateral", "lead", "leading",
+			"least", "left", "like", "like_regex", "limit", "listagg", "ln", "local", "localtime", "localtimestamp", "log", "log10",
+			"lower", "lpad", "ltrim", "match", "matches", "match_number", "match_recognize", "max", "member", "merge", "method",
+			"min", "minute", "mod", "modifies", "module", "month", "multiset", "national", "natural", "nchar", "nclob", "new",
+			"no", "none", "normalize", "not", "nth_value", "ntile", "null", "nullif", "numeric", "occurrences_regex",
+			"octet_length", "of", "offset", "old", "omit", "on", "one", "only", "open", "or", "order", "out", "outer", "over",
+			"overlaps", "overlay", "parameter", "partition", "pattern", "per", "percent", "percentile_cont", "percentile_disc",
+			"percent_rank", "period", "portion", "position", "position_regex", "power", "precedes", "precision", "prepare", "primary",
+			"procedure", "ptf", "range", "rank", "reads", "real", "recursive", "ref", "references", "referencing", "regr_avgx",
+			"regr_avgy", "regr_count", "regr_intercept", "regr_r2", "regr_slope", "regr_sxx", "regr_sxy", "regr_syy", "release",
+			"result", "return", "returns", "revoke", "right", "rollback", "rollup", "row", "rows", "row_number", "rpad", "running",
+			"savepoint", "scope", "scroll", "search", "second", "seek", "select", "sensitive", "session_user", "set", "show", "similar",
+			"sin", "sinh", "skip", "smallint", "some", "specific", "specifictype", "sql", "sqlexception", "sqlstate", "sqlwarning", "sqrt",
+			"start", "static", "stddev_pop", "stddev_samp", "submultiset", "subset", "substring", "substring_regex", "succeeds",
+			"sum", "symmetric", "system", "system_time", "system_user", "table", "tablesample", "tan", "tanh", "then", "time",
+			"timestamp", "timezone_hour", "timezone_minute", "to", "trailing", "translate", "translate_regex", "translation",
+			"treat", "trigger", "trim", "trim_array", "true", "truncate", "uescape", "union", "unique", "unknown", "unnest",
+			"update", "upper", "user", "using", "value", "values", "value_of", "varbinary", "varchar", "varying", "var_pop",
+			"var_samp", "versioning", "when", "whenever", "where", "width_bucket", "window", "with", "within", "without", "year"
+	   };
+
+		for (auto& keyword : keywords) { language.keywords.insert(keyword); }
+
+		language.isPunctuation = isCStylePunctuation;
+		language.getIdentifier = getCStyleIdentifier;
+		language.getNumber = getCStyleNumber;
 		initialized = true;
 	}
 
