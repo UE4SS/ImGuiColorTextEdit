@@ -759,7 +759,6 @@ void TextEditor::handleKeyboardInputs() {
 		auto isOptionalAltShift = !ctrl;
 	#else
 		auto isShiftAlt = !ctrl && shift && alt;
-		auto isOptionalCtrlShift = !alt;
 	#endif
 
 		// cursor movements and selections
