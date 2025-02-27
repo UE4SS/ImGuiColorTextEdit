@@ -26,13 +26,32 @@
 
 
 //
+// AutoComplete
+//
+
+class TextEditor;
+class Iterator;
+class AutoComplete {
+public:
+    virtual ~AutoComplete() = default;
+
+public:
+    virtual void renderWindow([[maybe_unused]] TextEditor&, [[maybe_unused]] float textOffset) {}
+    virtual void resetContext() {}
+    virtual void handleCharacter([[maybe_unused]] ImWchar) {}
+	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
+    virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd) {}
+    virtual void popScope([[maybe_unused]] ImWchar codepoint) {}
+};
+
+//
 //	TextEditor
 //
 
 class TextEditor {
 public:
 	// constructor
-	TextEditor() { SetPalette(defaultPalette); }
+	TextEditor() { SetPalette(defaultPalette); SetAutoComplete<AutoComplete>(); }
 
 	//
 	// Below is the public API
@@ -122,6 +141,10 @@ public:
 	inline void GetCursor(int& startLine, int& startColumn, int& endLine, int& endColumn, size_t cursor) const { return getCursor(startLine, startColumn, endLine, endColumn, cursor); }
 	inline void GetMainCursor(int& line, int& column) const { return getCursor(line, column, cursors.getMainIndex()); }
 	inline void GetCurrentCursor(int& line, int& column) const { return getCursor(line, column, cursors.getCurrentIndex()); }
+private:
+	class Cursor;
+public:
+	inline const Cursor& GetCurrentCursor() { return cursors.getCurrent(); }
 
 	// scrolling support
 	enum class Scroll {
@@ -724,14 +747,14 @@ private:
 	class Colorizer {
 	public:
 		// update colors in entire document
-		void updateEntireDocument(Document& document, const Language* language);
+		void updateEntireDocument(Document& document, const Language* language, AutoComplete* autoComplete);
 
 		// update colors in changed lines in specified document
-		void updateChangedLines(Document& document, const Language* language);
+		void updateChangedLines(Document& document, const Language* language, AutoComplete* autoComplete);
 
 	private:
 		// update color in a single line
-		State update(Line& line, const Language* language);
+		State update(Line& line, const Language* language, AutoComplete* autoComplete);
 
 		// see if string matches part of line
 		bool matches(Line::iterator start, Line::iterator end, const std::string_view& text);
@@ -969,4 +992,10 @@ private:
 
 	// language support
 	const Language* language = nullptr;
+
+	// auto-completion
+	std::unique_ptr<AutoComplete> autoComplete{};
+public:
+	template <typename AutoCompleteType>
+	inline void SetAutoComplete() { autoComplete = std::make_unique<AutoCompleteType>(); }
 };

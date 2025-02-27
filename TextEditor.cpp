@@ -181,7 +181,7 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 
 	// recolorize entire document and reset brackets (if required)
 	if (showMatchingBracketsChanged || languageChanged) {
-		colorizer.updateEntireDocument(document, language);
+		colorizer.updateEntireDocument(document, language, autoComplete.get());
 		bracketeer.reset();
 	}
 
@@ -191,7 +191,7 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	if (language) {
 		if (documentChanged) {
 			// recolorize updated lines
-			colorizer.updateChangedLines(document, language);
+			colorizer.updateChangedLines(document, language, autoComplete.get());
 		}
 
 		if (showMatchingBrackets && (documentChanged || showMatchingBracketsChanged || languageChanged)) {
@@ -219,6 +219,10 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	renderMargin();
 	renderLineNumbers();
 	renderDecorations();
+
+    if (autoComplete) {
+        autoComplete->renderWindow(*this, textOffset);
+    }
 
 	if (ImGui::BeginPopup("LineNumberContextMenu")) {
 		lineNumberContextMenuCallback(contextMenuLine);
@@ -837,10 +841,20 @@ void TextEditor::handleKeyboardInputs() {
 			}
 		}
 
+	    // auto-completion reset
+	    if (autoComplete) {
+	        autoComplete->resetContext();
+	    }
+
 		// handle regular text
 		if (!readOnly && !io.InputQueueCharacters.empty()) {
 			for (int i = 0; i < io.InputQueueCharacters.size(); i++) {
 				auto character = io.InputQueueCharacters[i];
+
+			    // auto-completion context creation
+			    if (autoComplete) {
+			        autoComplete->handleCharacter(character);
+			    }
 
 				if (character == '\n' || character >= 32) {
 					handleCharacter(character);
@@ -3383,7 +3397,7 @@ void TextEditor::Transactions::redo(Document& document, Cursors& cursors) {
 //	TextEditor::Colorizer::update
 //
 
-TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language) {
+TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language, AutoComplete* autoComplete) {
 	auto state = line.state;
 
 	// process all glyphs on this line
@@ -3491,6 +3505,9 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 						color = Color::keyword;
 
 					} else if (language->declarations.find(identifier) != language->declarations.end()) {
+					    if (autoComplete) {
+					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd);
+					    }
 						color = Color::declaration;
 
 					} else if (language->identifiers.find(identifier) != language->identifiers.end()) {
@@ -3509,6 +3526,9 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 
 				// is this punctuation
 				} else if (language->isPunctuation && language->isPunctuation(glyph->codepoint)) {
+				    if (autoComplete) {
+				        autoComplete->popScope(glyph->codepoint);
+				    }
 					(glyph++)->color = Color::punctuation;
 
 				} else {
@@ -3616,10 +3636,10 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 //	TextEditor::Colorizer::updateEntireDocument
 //
 
-void TextEditor::Colorizer::updateEntireDocument(Document& document, const Language* language) {
+void TextEditor::Colorizer::updateEntireDocument(Document& document, const Language* language, AutoComplete* autoComplete) {
 	if (language) {
 		for (auto line = document.begin(); line < document.end(); line++) {
-			auto state = update(*line, language);
+			auto state = update(*line, language, autoComplete);
 			auto next = line + 1;
 
 			if (next < document.end()) {
@@ -3644,10 +3664,10 @@ void TextEditor::Colorizer::updateEntireDocument(Document& document, const Langu
 //	TextEditor::Colorizer::updateChangedLines
 //
 
-void TextEditor::Colorizer::updateChangedLines(Document& document, const Language* language) {
+void TextEditor::Colorizer::updateChangedLines(Document& document, const Language* language, AutoComplete* autoComplete) {
 	for (auto line = document.begin(); line < document.end(); line++) {
 		if (line->colorize) {
-			auto state = update(*line, language);
+			auto state = update(*line, language, autoComplete);
 			auto next = line + 1;
 
 			if (next < document.end() && next->state != state) {
