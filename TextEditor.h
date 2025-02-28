@@ -42,6 +42,8 @@ public:
     virtual void handleCharacter([[maybe_unused]] ImWchar) {}
     virtual void handleBackspace([[maybe_unused]] std::string_view) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
+    virtual void handleIdentifier([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd) {}
+	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
     virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd) {}
     virtual void popScope([[maybe_unused]] ImWchar codepoint) {}
 	virtual bool isAutoCompleteNavEnabled() { return false; }

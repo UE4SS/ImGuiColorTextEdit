@@ -3522,6 +3522,10 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 						identifier.append(utf8, CodePoint::write(utf8, codepoint));
 					}
 
+					if (autoComplete) {
+						autoComplete->handleIdentifier(identifier, &tokenEnd, &lineEnd);
+					}
+
 					if (language->keywords.find(identifier) != language->keywords.end()) {
 						color = Color::keyword;
 
