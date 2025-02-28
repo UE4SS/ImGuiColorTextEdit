@@ -1928,6 +1928,11 @@ void TextEditor::moveUpLines() {
 			cursor->update(start - Coordinate(1, 0), end - Coordinate(1, 0));
 		}
 
+		if (autoComplete) {
+			autoComplete->forceResetContext(true);
+			colorizer.updateEntireDocument(document, language, autoComplete.get());
+		}
+
 		endTransaction(transaction);
 	}
 }
@@ -1960,6 +1965,11 @@ void TextEditor::moveDownLines() {
 
 			// update cursor
 			cursor->update(start + Coordinate(1, 0), end + Coordinate(1, 0));
+		}
+
+		if (autoComplete) {
+			autoComplete->forceResetContext(true);
+			colorizer.updateEntireDocument(document, language, autoComplete.get());
 		}
 
 		endTransaction(transaction);

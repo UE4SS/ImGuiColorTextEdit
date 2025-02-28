@@ -38,6 +38,7 @@ public:
 public:
     virtual void renderWindow([[maybe_unused]] TextEditor&, [[maybe_unused]] float textOffset) {}
     virtual void resetContext() {}
+    virtual void forceResetContext([[maybe_unused]] bool full_delete) {}
     virtual void handleCharacter([[maybe_unused]] ImWchar) {}
     virtual void handleBackspace([[maybe_unused]] std::string_view) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
