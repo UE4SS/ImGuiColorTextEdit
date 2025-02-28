@@ -150,9 +150,14 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
 
 	// ensure editor has focus (if required)
+	static size_t frame_counter{};
 	if (focusOnEditor) {
 		ImGui::SetNextWindowFocus();
-		focusOnEditor = false;
+		if (frame_counter >= 2) {
+			focusOnEditor = false;
+			frame_counter = 0;
+		}
+		++frame_counter;
 	}
 
 	// set scroll (if required)
@@ -176,7 +181,7 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 
 	// recolorize entire document and reset brackets (if required)
 	if (showMatchingBracketsChanged || languageChanged) {
-		colorizer.updateEntireDocument(document, language);
+		colorizer.updateEntireDocument(document, language, autoComplete.get());
 		bracketeer.reset();
 	}
 
@@ -186,7 +191,7 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	if (language) {
 		if (documentChanged) {
 			// recolorize updated lines
-			colorizer.updateChangedLines(document, language);
+			colorizer.updateChangedLines(document, language, autoComplete.get());
 		}
 
 		if (showMatchingBrackets && (documentChanged || showMatchingBracketsChanged || languageChanged)) {
@@ -214,6 +219,10 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	renderMargin();
 	renderLineNumbers();
 	renderDecorations();
+
+    if (autoComplete) {
+        autoComplete->renderWindow(*this, textOffset);
+    }
 
 	if (ImGui::BeginPopup("LineNumberContextMenu")) {
 		lineNumberContextMenuCallback(contextMenuLine);
@@ -747,26 +756,24 @@ void TextEditor::handleKeyboardInputs() {
 		// Dear ImGui switches the Cmd(Super) and Ctrl keys on MacOS
 		auto super = ImGui::IsKeyDown(ImGuiMod_Super);
 		auto isCtrlShift = !ctrl && shift && !alt && super;
-		auto isOptionalAltShift = !ctrl;
 	#else
 		auto isShiftAlt = !ctrl && shift && alt;
-		auto isOptionalCtrlShift = !alt;
 	#endif
 
 		// cursor movements and selections
-		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { moveUp(1, shift); }
-		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow)) { moveDown(1, shift); }
+		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveUp(1, shift); }
+		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveDown(1, shift); }
 
 #if __APPLE__
 		else if (isCtrlShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { shrinkSelectionsToCurlyBrackets(); }
 		else if (isCtrlShift && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { growSelectionsToCurlyBrackets(); }
-		else if (isOptionalAltShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { moveLeft(shift, alt); }
-		else if (isOptionalAltShift && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { moveRight(shift, alt); }
+		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { moveLeft(shift, alt); }
+		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { moveRight(shift, alt); }
 #else
 		else if (isShiftAlt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { shrinkSelectionsToCurlyBrackets(); }
 		else if (isShiftAlt && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { growSelectionsToCurlyBrackets(); }
-		else if (isOptionalCtrlShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { moveLeft(shift, ctrl); }
-		else if (isOptionalCtrlShift && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { moveRight(shift, ctrl); }
+		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { moveLeft(shift, ctrl); }
+		else if (!alt && ImGui::IsKeyPressed(ImGuiKey_RightArrow)) { moveRight(shift, ctrl); }
 #endif
 
 		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_PageUp)) { moveUp(visibleLines - 2, shift); }
@@ -813,9 +820,9 @@ void TextEditor::handleKeyboardInputs() {
 		else if (isNoModifiers && ImGui::IsKeyPressed(ImGuiKey_Insert)) { overwrite = !overwrite; }
 
 		// handle new line
-		else if (!readOnly && isNoModifiers && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) { handleCharacter('\n'); }
-		else if (!readOnly && isShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) { insertLineBelow(); }
-		else if (!readOnly && isShiftShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) { insertLineAbove(); }
+		else if (!readOnly && isNoModifiers && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { handleCharacter('\n'); }
+		else if (!readOnly && isShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { insertLineBelow(); }
+		else if (!readOnly && isShiftShortcut && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { insertLineAbove(); }
 
 		// handle tabs
 		else if (!readOnly && isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_Tab)) {
@@ -832,10 +839,20 @@ void TextEditor::handleKeyboardInputs() {
 			}
 		}
 
+	    // auto-completion reset
+	    if (autoComplete) {
+	        autoComplete->resetContext();
+	    }
+
 		// handle regular text
 		if (!readOnly && !io.InputQueueCharacters.empty()) {
 			for (int i = 0; i < io.InputQueueCharacters.size(); i++) {
 				auto character = io.InputQueueCharacters[i];
+
+			    // auto-completion context creation
+			    if (autoComplete) {
+			        autoComplete->handleCharacter(character);
+			    }
 
 				if (character == '\n' || character >= 32) {
 					handleCharacter(character);
@@ -3388,7 +3405,7 @@ void TextEditor::Transactions::redo(Document& document, Cursors& cursors) {
 //	TextEditor::Colorizer::update
 //
 
-TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language) {
+TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language, AutoComplete* autoComplete) {
 	auto state = line.state;
 
 	// process all glyphs on this line
@@ -3496,6 +3513,9 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 						color = Color::keyword;
 
 					} else if (language->declarations.find(identifier) != language->declarations.end()) {
+					    if (autoComplete) {
+					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd);
+					    }
 						color = Color::declaration;
 
 					} else if (language->identifiers.find(identifier) != language->identifiers.end()) {
@@ -3514,6 +3534,9 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 
 				// is this punctuation
 				} else if (language->isPunctuation && language->isPunctuation(glyph->codepoint)) {
+				    if (autoComplete) {
+				        autoComplete->popScope(glyph->codepoint);
+				    }
 					(glyph++)->color = Color::punctuation;
 
 				} else {
@@ -3621,10 +3644,10 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 //	TextEditor::Colorizer::updateEntireDocument
 //
 
-void TextEditor::Colorizer::updateEntireDocument(Document& document, const Language* language) {
+void TextEditor::Colorizer::updateEntireDocument(Document& document, const Language* language, AutoComplete* autoComplete) {
 	if (language) {
 		for (auto line = document.begin(); line < document.end(); line++) {
-			auto state = update(*line, language);
+			auto state = update(*line, language, autoComplete);
 			auto next = line + 1;
 
 			if (next < document.end()) {
@@ -3649,10 +3672,10 @@ void TextEditor::Colorizer::updateEntireDocument(Document& document, const Langu
 //	TextEditor::Colorizer::updateChangedLines
 //
 
-void TextEditor::Colorizer::updateChangedLines(Document& document, const Language* language) {
+void TextEditor::Colorizer::updateChangedLines(Document& document, const Language* language, AutoComplete* autoComplete) {
 	for (auto line = document.begin(); line < document.end(); line++) {
 		if (line->colorize) {
-			auto state = update(*line, language);
+			auto state = update(*line, language, autoComplete);
 			auto next = line + 1;
 
 			if (next < document.end() && next->state != state) {
