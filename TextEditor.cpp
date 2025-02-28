@@ -1741,6 +1741,9 @@ void TextEditor::handleBackspace(bool wordMode) {
 	for (auto cursor = cursors.begin(); cursor < cursors.end(); cursor++) {
 		auto start = cursor->hasSelection() ? cursor->getSelectionStart() : document.getLeft(cursor->getSelectionStart(), wordMode);
 		auto end = cursor->getSelectionEnd();
+		if (autoComplete) {
+			autoComplete->handleBackspace(document.getSectionText(start, end));
+		}
 		deleteText(transaction, start, end);
 		cursor->update(start, false);
 		cursors.adjustForDelete(cursor, start, end);
