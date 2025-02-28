@@ -807,8 +807,8 @@ void TextEditor::handleKeyboardInputs() {
 		// text manipulation
 		else if (!readOnly && isShortcut && ImGui::IsKeyPressed(ImGuiKey_LeftBracket)) { deindentLines(); }
 		else if (!readOnly && isShortcut && ImGui::IsKeyPressed(ImGuiKey_RightBracket)) { indentLines(); }
-		else if (!readOnly && isAltOnly && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { moveUpLines(); }
-		else if (!readOnly && isAltOnly && ImGui::IsKeyPressed(ImGuiKey_DownArrow)) { moveDownLines(); }
+		else if (!readOnly && isAltOnly && ImGui::IsKeyPressed(ImGuiKey_UpArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveUpLines(); }
+		else if (!readOnly && isAltOnly && ImGui::IsKeyPressed(ImGuiKey_DownArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveDownLines(); }
 		else if (!readOnly && language && isShortcut && ImGui::IsKeyPressed(ImGuiKey_Slash)) { toggleComments(); }
 
 		// find/replace support
