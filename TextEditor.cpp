@@ -3424,6 +3424,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 	// process all glyphs on this line
 	auto nonWhiteSpace = false;
 	auto glyph = line.begin();
+    bool autoCompleteAlreadyPushed{};
 
 	while (glyph < line.end()) {
 		if (state == State::inText) {
@@ -3532,6 +3533,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 					} else if (language->declarations.find(identifier) != language->declarations.end()) {
 					    if (autoComplete) {
 					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd);
+					        autoCompleteAlreadyPushed = true;
 					    }
 						color = Color::declaration;
 
@@ -3651,6 +3653,22 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 			}
 		}
 	}
+
+    if (autoComplete && !autoCompleteAlreadyPushed) {
+        std::string line_as_string{};
+
+        for (auto i = line.begin(); i < line.end(); ++i) {
+            ImWchar codepoint = i->codepoint;
+
+            if (!language->caseSensitive) {
+                codepoint = CodePoint::toLower(codepoint);
+            }
+
+            char utf8[4];
+            line_as_string.append(utf8, CodePoint::write(utf8, codepoint));
+        }
+        autoComplete->handleLine(line_as_string);
+    }
 
 	line.colorize = false;
 	return state;
