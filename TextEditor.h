@@ -48,6 +48,7 @@ public:
     virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd, [[maybe_unused]] int lineNumber) {}
     virtual void popScope([[maybe_unused]] ImWchar codepoint) {}
 	virtual bool isAutoCompleteNavEnabled() { return false; }
+	virtual void closeAutoCompleteNav() {}
 };
 
 //

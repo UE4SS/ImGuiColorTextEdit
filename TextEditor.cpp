@@ -761,8 +761,8 @@ void TextEditor::handleKeyboardInputs() {
 	#endif
 
 		// cursor movements and selections
-		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveUp(1, shift); }
-		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow) && (!autoComplete || !autoComplete->isAutoCompleteNavEnabled())) { moveDown(1, shift); }
+		if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_UpArrow)) { moveUp(1, shift); }
+		else if (isOptionalShift && ImGui::IsKeyPressed(ImGuiKey_DownArrow)) { moveDown(1, shift); }
 
 #if __APPLE__
 		else if (isCtrlShift && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) { shrinkSelectionsToCurlyBrackets(); }
@@ -1540,6 +1540,11 @@ void TextEditor::clearMarkers() {
 //
 
 void TextEditor::moveUp(int lines, bool select) {
+    if (select && autoComplete && autoComplete->isAutoCompleteNavEnabled()) {
+        autoComplete->closeAutoCompleteNav();
+    } else if (autoComplete && autoComplete->isAutoCompleteNavEnabled()) {
+        return;
+    }
 	for (auto& cursor : cursors) {
 		cursor.update(document.getUp(cursor.getInteractiveEnd(), lines), select);
 	}
@@ -1553,6 +1558,11 @@ void TextEditor::moveUp(int lines, bool select) {
 //
 
 void TextEditor::moveDown(int lines, bool select) {
+    if (select && autoComplete && autoComplete->isAutoCompleteNavEnabled()) {
+        autoComplete->closeAutoCompleteNav();
+    } else if (autoComplete && autoComplete->isAutoCompleteNavEnabled()) {
+        return;
+    }
 	for (auto& cursor : cursors) {
 		cursor.update(document.getDown(cursor.getInteractiveEnd(), lines), select);
 	}
