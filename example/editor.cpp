@@ -60,6 +60,7 @@ static const char* demo =
 
 Editor::Editor() {
 	// setup text editor with demo text
+	originalText = demo;
 	editor.SetText(demo);
 	editor.SetLanguage(TextEditor::Language::Cpp());
 	version = editor.GetUndoIndex();
@@ -74,12 +75,14 @@ Editor::Editor() {
 void Editor::newFile() {
 	if (isDirty()) {
 		showConfirmClose([this]() {
+			originalText.clear();
 			editor.SetText("");
 			version = editor.GetUndoIndex();
 			filename = "untitled";
 		});
 
 	} else {
+		originalText.clear();
 		editor.SetText("");
 		version = editor.GetUndoIndex();
 		filename = "untitled";
@@ -114,6 +117,7 @@ void Editor::openFile(const std::string& path) {
 		text.assign((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
 		stream.close();
 
+		originalText = text;
 		editor.SetText(text);
 		version = editor.GetUndoIndex();
 		filename = path;
@@ -149,7 +153,7 @@ void Editor::saveFile() {
 void Editor::render() {
 	// create the outer window
 	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
-	ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
+	ImGui::SetNextWindowSize(ImGui::GetMainViewport()->Size);
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
 	ImGui::Begin("MainWindow", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_MenuBar);
 
@@ -166,7 +170,10 @@ void Editor::render() {
 	ImGui::Spacing();
 	renderStatusbar();
 
-	if (state == State::openFile) {
+	if (state ==State::diff) {
+		renderDiff();
+
+	} else if (state == State::openFile) {
 		renderFileOpen();
 
 	} else if (state == State::saveFileAs) {
@@ -235,6 +242,10 @@ void Editor::renderMenubar() {
 			if (ImGui::MenuItem("Tabs To Spaces")) { editor.TabsToSpaces(); }
 			if (ImGui::MenuItem("Spaces To Tabs")) { editor.SpacesToTabs(); }
 			if (ImGui::MenuItem("Strip Trailing Whitespaces")) { editor.StripTrailingWhitespaces(); }
+
+			ImGui::Separator();
+			if (ImGui::MenuItem("Show Diff", " " SHORTCUT "I")) { showDiff(); }
+
 			ImGui::EndMenu();
 		}
 
@@ -265,6 +276,8 @@ void Editor::renderMenubar() {
 			flag = editor.IsShowLineNumbersEnabled(); if (ImGui::MenuItem("Show Line Numbers", nullptr, &flag)) { editor.SetShowLineNumbersEnabled(flag); };
 			flag = editor.IsShowingMatchingBrackets(); if (ImGui::MenuItem("Show Matching Brackets", nullptr, &flag)) { editor.SetShowMatchingBrackets(flag); };
 			flag = editor.IsCompletingPairedGlyphs(); if (ImGui::MenuItem("Complete Matching Glyphs", nullptr, &flag)) { editor.SetCompletePairedGlyphs(flag); };
+			flag = editor.IsShowPanScrollIndicatorEnabled(); if (ImGui::MenuItem("Show Pan/Scroll Indicator", nullptr, &flag)) { editor.SetShowPanScrollIndicatorEnabled(flag); };
+			flag = editor.IsMiddleMousePanMode(); if (ImGui::MenuItem("Middle Mouse Pan Mode", nullptr, &flag)) { if (flag) editor.SetMiddleMousePanMode(); else editor.SetMiddleMouseScrollMode(); };
 			ImGui::EndMenu();
 		}
 
@@ -285,6 +298,7 @@ void Editor::renderMenubar() {
 			if (ImGui::IsKeyPressed(ImGuiKey_N)) { newFile(); }
 			else if (ImGui::IsKeyPressed(ImGuiKey_O)) { openFile(); }
 			else if (ImGui::IsKeyPressed(ImGuiKey_S)) { if (filename == "untitled") { showSaveFileAs(); } else { saveFile(); } }
+			else if (ImGui::IsKeyPressed(ImGuiKey_I)) { showDiff(); }
 		}
 	}
 }
@@ -380,6 +394,17 @@ void Editor::renderStatusbar() {
 
 
 //
+//	Editor::showDiff
+//
+
+void Editor::showDiff() {
+	diff.SetLanguage(editor.GetLanguage());
+	diff.SetText(originalText, editor.GetText());
+	state = State::diff;
+}
+
+
+//
 //	Editor::showFileOpen
 //
 
@@ -388,9 +413,10 @@ void Editor::showFileOpen() {
 	IGFD::FileDialogConfig config;
 	config.countSelectionMax = 1;
 
-	config.flags = ImGuiFileDialogFlags_Modal |
-			ImGuiFileDialogFlags_DontShowHiddenFiles |
-			ImGuiFileDialogFlags_ReadOnlyFileNameField;
+	config.flags =
+		ImGuiFileDialogFlags_Modal |
+		ImGuiFileDialogFlags_DontShowHiddenFiles |
+		ImGuiFileDialogFlags_ReadOnlyFileNameField;
 
 	ImGuiFileDialog::Instance()->OpenDialog("file-open", "Select File to Open...", ".*", config);
 	state = State::openFile;
@@ -405,9 +431,10 @@ void Editor::showSaveFileAs() {
 	IGFD::FileDialogConfig config;
 	config.countSelectionMax = 1;
 
-	config.flags = ImGuiFileDialogFlags_Modal |
-			ImGuiFileDialogFlags_DontShowHiddenFiles |
-			ImGuiFileDialogFlags_ConfirmOverwrite;
+	config.flags =
+		ImGuiFileDialogFlags_Modal |
+		ImGuiFileDialogFlags_DontShowHiddenFiles |
+		ImGuiFileDialogFlags_ConfirmOverwrite;
 
 	ImGuiFileDialog::Instance()->OpenDialog("file-saveas", "Save File as...", "*", config);
 	state = State::saveFileAs;
@@ -444,14 +471,52 @@ void Editor::showError(const std::string &message) {
 
 
 //
+//	Editor::renderDiff
+//
+
+void Editor::renderDiff() {
+	ImGui::OpenPopup("Changes since Opening File##diff");
+	auto viewport = ImGui::GetMainViewport();
+	ImVec2 center = viewport->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+	if (ImGui::BeginPopupModal("Changes since Opening File##diff", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+		diff.Render("diff", viewport->Size * 0.8f, true);
+
+		ImGui::Separator();
+		static constexpr float buttonWidth = 80.0f;
+		auto buttonOffset = ImGui::GetContentRegionAvail().x - buttonWidth;
+		bool sideBySide = diff.GetSideBySideMode();
+
+		if (ImGui::Checkbox("Show side-by-side", &sideBySide)) {
+			diff.SetSideBySideMode(sideBySide);
+		}
+
+		ImGui::SameLine();
+		ImGui::Indent(buttonOffset);
+
+		if (ImGui::Button("OK", ImVec2(buttonWidth, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+			state = State::edit;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+}
+
+
+//
 //	Editor::renderFileOpen
 //
 
 void Editor::renderFileOpen() {
 	// handle file open dialog
-	ImVec2 maxSize = ImGui::GetIO().DisplaySize;
-	ImVec2 minSize = ImVec2(maxSize.x * 0.5f, maxSize.y * 0.5f);
+	ImVec2 maxSize = ImGui::GetMainViewport()->Size;
+	ImVec2 minSize = maxSize * 0.5f;
 	auto dialog = ImGuiFileDialog::Instance();
+
+	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
 	if (dialog->Display("file-open", ImGuiWindowFlags_NoCollapse, minSize, maxSize)) {
 		// open selected file (if required)
@@ -472,9 +537,12 @@ void Editor::renderFileOpen() {
 
 void Editor::renderSaveAs() {
 	// handle saveas dialog
-	ImVec2 maxSize = ImGui::GetIO().DisplaySize;
-	ImVec2 minSize = ImVec2(maxSize.x * 0.5f, maxSize.y * 0.5f);
+	ImVec2 maxSize = ImGui::GetMainViewport()->Size;
+	ImVec2 minSize = maxSize * 0.5f;
 	auto dialog = ImGuiFileDialog::Instance();
+
+	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
 
 	if (dialog->Display("file-saveas", ImGuiWindowFlags_NoCollapse, minSize, maxSize)) {
 		// open selected file if required
@@ -507,7 +575,7 @@ void Editor::renderConfirmClose() {
 		ImGui::Separator();
 
 		static constexpr float buttonWidth = 80.0f;
-		ImGui::SameLine(0.0f, ImGui::GetContentRegionAvail().x - buttonWidth * 2.0f - ImGui::GetStyle().ItemSpacing.x);
+		ImGui::Indent(ImGui::GetContentRegionAvail().x - buttonWidth * 2.0f - ImGui::GetStyle().ItemSpacing.x);
 
 		if (ImGui::Button("OK", ImVec2(buttonWidth, 0.0f))) {
 			state = State::edit;
@@ -541,7 +609,7 @@ void Editor::renderConfirmQuit() {
 		ImGui::Separator();
 
 		static constexpr float buttonWidth = 80.0f;
-		ImGui::SameLine(0.0f, ImGui::GetContentRegionAvail().x - buttonWidth * 2.0f - ImGui::GetStyle().ItemSpacing.x);
+		ImGui::Indent(ImGui::GetContentRegionAvail().x - buttonWidth * 2.0f - ImGui::GetStyle().ItemSpacing.x);
 
 		if (ImGui::Button("OK", ImVec2(buttonWidth, 0.0f))) {
 			done = true;
@@ -575,7 +643,7 @@ void Editor::renderConfirmError() {
 		ImGui::Separator();
 
 		static constexpr float buttonWidth = 80.0f;
-		ImGui::SameLine(0.0f, ImGui::GetContentRegionAvail().x);
+		ImGui::Indent(ImGui::GetContentRegionAvail().x - buttonWidth);
 
 		if (ImGui::Button("OK", ImVec2(buttonWidth, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
 			errorMessage.clear();

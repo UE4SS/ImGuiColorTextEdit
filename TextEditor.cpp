@@ -17,6 +17,7 @@
 #endif
 
 #include "imgui.h"
+#include "imgui_internal.h"
 
 #include "TextEditor.h"
 
@@ -31,6 +32,7 @@ void TextEditor::setText(const std::string_view &text) {
 	transactions.reset();
 	bracketeer.reset();
 	cursors.clearAll();
+	clearMarkers();
 	makeCursorVisible();
 }
 
@@ -64,33 +66,24 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	if (decoratorWidth > 0.0f) {
 		textOffset = decorationOffset + decoratorWidth + decorationMargin * glyphSize.x;
 
+	} else if (decoratorWidth < 0.0f) {
+		textOffset = decorationOffset + (-decoratorWidth + decorationMargin) * glyphSize.x;
+
 	} else {
 		textOffset = decorationOffset + textMargin * glyphSize.x;
 	}
 
 	// get current position and total/visible editor size
-	auto pos = ImGui::GetCursorPos();
+	auto pos = ImGui::GetCursorScreenPos();
 	auto totalSize = ImVec2(textOffset + document.getMaxColumn() * glyphSize.x + cursorWidth, document.size() * glyphSize.y);
-	auto visibleSize = ImGui::GetContentRegionAvail();
+	auto region = ImGui::GetContentRegionAvail();
+	auto visibleSize = ImGui::CalcItemSize(size, region.x, region.y); // messing with Dear ImGui internals
 
-	if (size.x > 0.0f) {
-		visibleSize.x = std::min(visibleSize.x, size.x);
-
-	} else if (size.x < 0.0f) {
-		visibleSize.x = std::max(visibleSize.x + size.x, 0.0f);
-	}
-
-	if (size.y > 0.0f) {
-		visibleSize.y = std::min(visibleSize.y, size.y);
-
-	} else if (size.y < 0.0f) {
-		visibleSize.y = std::max(visibleSize.y + size.y, 0.0f);
-	}
 
 	// see if we have scrollbars
 	float scrollbarSize = ImGui::GetStyle().ScrollbarSize;
-	float verticalScrollBarSize = (totalSize.y > visibleSize.y) ? scrollbarSize : 0.0f;
-	float horizontalScrollBarSize = (totalSize.x > visibleSize.x) ? scrollbarSize : 0.0f;
+	verticalScrollBarSize = (totalSize.y > visibleSize.y) ? scrollbarSize : 0.0f;
+	horizontalScrollBarSize = (totalSize.x > visibleSize.x) ? scrollbarSize : 0.0f;
 
 	// determine visible lines and columns
 	visibleWidth = visibleSize.x - textOffset - verticalScrollBarSize;
@@ -145,9 +138,10 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 		scrollToLineNumber = -1;
 	}
 
-	// set style
-	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(palette.get(Color::background)));
-	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+	// set scroll (if required)
+	if (scrollX >= 0.0f || scrollY >= 0.0f) {
+		ImGui::SetNextWindowScroll(ImVec2(scrollX, scrollY));
+	}
 
 	// ensure editor has focus (if required)
 	static size_t frame_counter{};
@@ -160,14 +154,11 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 		++frame_counter;
 	}
 
-	// set scroll (if required)
-	if (scrollX >= 0.0f || scrollY >= 0.0f) {
-		ImGui::SetNextWindowScroll(ImVec2(scrollX, scrollY));
-	}
-
 	// start a new child window
 	// this must be done before we handle keyboard and mouse interactions to ensure correct Dear ImGui context
 	ImGui::SetNextWindowContentSize(totalSize);
+	ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+	ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertU32ToFloat4(palette.get(Color::background)));
 	ImGui::BeginChild(title, size, border, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoNavInputs);
 
 	// handle keyboard and mouse inputs
@@ -219,6 +210,8 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 	renderMargin();
 	renderLineNumbers();
 	renderDecorations();
+	renderScrollbarMiniMap();
+	renderPanScrollIndicator();
 
     if (autoComplete) {
         autoComplete->renderWindow(*this, textOffset);
@@ -234,12 +227,12 @@ void TextEditor::render(const char* title, const ImVec2& size, bool border) {
 		ImGui::EndPopup();
 	}
 
-	ImGui::EndChild();
-	ImGui::PopStyleVar();
-	ImGui::PopStyleColor();
-
 	// render find/replace popup
-	renderFindReplace(pos, visibleSize);
+	renderFindReplace(pos, visibleSize.x - verticalScrollBarSize);
+
+	ImGui::EndChild();
+	ImGui::PopStyleColor();
+	ImGui::PopStyleVar();
 }
 
 
@@ -460,18 +453,18 @@ void TextEditor::renderCursors() {
 		}
 
 		// notify OS of text input position for advanced Input Method Editor (IME)
-		// this is very hackish but required for SDL3 backend as it will not report
+		// this is very hackish but required for the SDL3 backend as it will not report
 		// text input events unless we do this
-		if (!readOnly && ImGui::GetPlatformIO().Platform_SetImeDataFn) {
+		if (!readOnly) {
 			auto pos = cursors.getCurrent().getInteractiveEnd();
 			auto x = cursorScreenPos.x + textOffset + pos.column * glyphSize.x - 1;
 			auto y = cursorScreenPos.y + pos.line * glyphSize.y;
 
-			ImGuiPlatformImeData data;
-			data.WantVisible = true;
-			data.InputPos = ImVec2(x, y);
-			data.InputLineHeight = glyphSize.y;
-			ImGui::GetPlatformIO().Platform_SetImeDataFn(ImGui::GetIO().Ctx, ImGui::GetMainViewport(), &data);
+			// messing with Dear ImGui internals
+			auto context = ImGui::GetCurrentContext();
+			context->PlatformImeData.WantVisible = true;
+			context->PlatformImeData.InputPos = ImVec2(x, y);
+			context->PlatformImeData.InputLineHeight = glyphSize.y;
 		}
 	}
 }
@@ -482,7 +475,7 @@ void TextEditor::renderCursors() {
 //
 
 void TextEditor::renderMargin() {
-	if ((decoratorWidth > 0.0f && decoratorCallback) || showLineNumbers) {
+	if ((decoratorWidth != 0.0f && decoratorCallback) || showLineNumbers) {
 		// erase background in case we are scrolling horizontally
 		if (ImGui::GetScrollX() > 0.0f) {
 			ImGui::GetWindowDrawList()->AddRectFilled(
@@ -520,10 +513,11 @@ void TextEditor::renderLineNumbers() {
 //
 
 void TextEditor::renderDecorations() {
-	if (decoratorWidth > 0.0f && decoratorCallback) {
+	if (decoratorWidth != 0.0f && decoratorCallback) {
 		auto cursorScreenPos = ImGui::GetCursorScreenPos();
 		auto position = ImVec2(ImGui::GetWindowPos().x + decorationOffset, cursorScreenPos.y + glyphSize.y * firstVisibleLine);
-		Decorator decorator{0, decoratorWidth, glyphSize.y};
+		auto widthInPixels = (decoratorWidth < 0.0f) ? -decoratorWidth * glyphSize.x: decoratorWidth;
+		Decorator decorator{0, widthInPixels, glyphSize.y, glyphSize};
 
 		for (int i = firstVisibleLine; i <= lastVisibleLine; i++) {
 			decorator.line = i;
@@ -535,6 +529,102 @@ void TextEditor::renderDecorations() {
 		}
 
 		ImGui::SetCursorScreenPos(cursorScreenPos);
+	}
+}
+
+
+//
+//	TextEditor::renderScrollbarMiniMap
+//
+
+void TextEditor::renderScrollbarMiniMap() {
+	// based on https://github.com/ocornut/imgui/issues/3114
+	// messing with Dear ImGui internals
+	if (showScrollbarMiniMap) {
+		auto window = ImGui::GetCurrentWindow();
+
+		if (window->ScrollbarY) {
+			auto drawList = ImGui::GetWindowDrawList();
+			auto rect = ImGui::GetWindowScrollbarRect(window, ImGuiAxis_Y);
+			auto lineHeight = rect.GetHeight() / static_cast<float>(document.size());
+			auto offset = (rect.Max.x - rect.Min.x) * 0.3f;
+			auto left = rect.Min.x + offset;
+			auto right = rect.Max.x - offset;
+
+			drawList->PushClipRect(rect.Min, rect.Max, false);
+
+			// render cursor locations
+			for (auto& cursor : cursors) {
+				auto begin = cursor.getSelectionStart();
+				auto end = cursor.getSelectionEnd();
+
+				auto ly1 = std::round(rect.Min.y + begin.line * lineHeight);
+				auto ly2 = std::round(rect.Min.y + (end.line + 1) * lineHeight);
+
+				drawList->AddRectFilled(ImVec2(left, ly1), ImVec2(right, ly2), palette.get(Color::selection));
+			}
+
+			// render marker locations
+			if (markers.size()) {
+				for (size_t line = 0; line < document.size(); line++) {
+					if (document[line].marker) {
+						auto color = markers[document[line].marker - 1].textColor;
+
+						if (!color) {
+							color = markers[document[line].marker - 1].lineNumberColor;
+						}
+
+						auto ly = std::round(rect.Min.y + line * lineHeight);
+						drawList->AddRectFilled(ImVec2(left, ly), ImVec2(right, ly + lineHeight), color);
+					}
+				}
+			}
+
+			drawList->PopClipRect();
+		}
+	}
+}
+
+
+//
+//	TextEditor::renderPanScrollIndicator
+//
+
+void TextEditor::renderPanScrollIndicator() {
+	if (showPanScrollIndicator && (panning || scrolling)) {
+		auto drawList = ImGui::GetWindowDrawList();
+		auto center =ImGui::GetWindowPos() + ImGui::GetWindowSize() / 2.0f;
+		static constexpr int alpha = 160;
+		drawList->AddCircleFilled(center, 20.0f, IM_COL32(255, 255, 255, alpha));
+		drawList->AddCircle(center, 5.0f, IM_COL32(0, 0, 0, alpha), 0, 2.0f);
+
+		drawList->AddTriangle(
+			ImVec2(center.x - 15.0f, center.y),
+			ImVec2(center.x - 8.0f, center.y - 4.0f),
+			ImVec2(center.x - 8.0f, center.y + 4.0f),
+			IM_COL32(0, 0, 0, alpha),
+			2.0f);
+
+		drawList->AddTriangle(
+			ImVec2(center.x + 15.0f, center.y),
+			ImVec2(center.x + 8.0f, center.y - 4.0f),
+			ImVec2(center.x + 8.0f, center.y + 4.0f),
+			IM_COL32(0, 0, 0, alpha),
+			2.0f);
+
+		drawList->AddTriangle(
+			ImVec2(center.x, center.y - 15.0f),
+			ImVec2(center.x - 4.0f, center.y - 8.0f),
+			ImVec2(center.x + 4.0f, center.y - 8.0f),
+			IM_COL32(0, 0, 0, alpha),
+			2.0f);
+
+		drawList->AddTriangle(
+			ImVec2(center.x, center.y + 15.0f),
+			ImVec2(center.x - 4.0f, center.y + 8.0f),
+			ImVec2(center.x + 4.0f, center.y + 8.0f),
+			IM_COL32(0, 0, 0, alpha),
+			2.0f);
 	}
 }
 
@@ -595,13 +685,14 @@ static bool inputString(const char* label, std::string* value, ImGuiInputTextFla
 //	TextEditor::renderFindReplace
 //
 
-void TextEditor::renderFindReplace(ImVec2 pos, ImVec2 contentSize) {
+void TextEditor::renderFindReplace(ImVec2 pos, float width) {
 	// render find/replace window (if required)
 	if (findReplaceVisible) {
 		// save current screen position
 		auto currentScreenPosition = ImGui::GetCursorScreenPos();
 
 		// calculate sizes
+		ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 4.0f));
 		auto& style = ImGui::GetStyle();
 		auto fieldWidth = 250.0f;
 
@@ -629,11 +720,13 @@ void TextEditor::renderFindReplace(ImVec2 pos, ImVec2 contentSize) {
 			optionWidth * 3.0f + style.ItemSpacing.x * 2.0f;
 
 		// create window
-		ImGui::SetCursorPos(ImVec2(
-			pos.x + contentSize.x - windowWidth - style.ScrollbarSize - style.ItemSpacing.x,
+		ImGui::SetNextWindowPos(ImVec2(
+			pos.x + width - windowWidth - style.ItemSpacing.x,
 			pos.y + style.ItemSpacing.y * 2.0f));
 
-		ImGui::SetNextWindowBgAlpha(0.6f);
+		ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight));
+		ImGui::SetNextWindowBgAlpha(0.75f);
+
 		ImGui::BeginChild("find-replace", ImVec2(windowWidth, windowHeight), ImGuiChildFlags_Borders);
 		ImGui::SetNextItemWidth(fieldWidth);
 
@@ -723,6 +816,7 @@ void TextEditor::renderFindReplace(ImVec2 pos, ImVec2 contentSize) {
 		}
 
 		ImGui::EndChild();
+		ImGui::PopStyleVar();
 		ImGui::SetCursorScreenPos(currentScreenPosition);
 	}
 }
@@ -870,11 +964,59 @@ void TextEditor::handleKeyboardInputs() {
 //
 
 void TextEditor::handleMouseInteractions() {
+	// handle middle mouse button modes
+	panning &= panMode && ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+	auto absoluteMousePos = ImGui::GetMousePos() - ImGui::GetWindowPos();
+
+	if (panning && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+		// handle middle mouse button panning
+		auto windowSize = ImGui::GetWindowSize();
+		auto mouseDelta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
+		float dragFactor = ImGui::GetIO().DeltaTime * 15.0f;
+		ImVec2 autoPanMargin(glyphSize.x * 4.0f, glyphSize.y * 2.0f);
+
+		if (absoluteMousePos.x < textOffset + autoPanMargin.x) {
+			mouseDelta.x = (absoluteMousePos.x - (textOffset + autoPanMargin.x)) * dragFactor;
+
+		} else if (absoluteMousePos.x > windowSize.x - verticalScrollBarSize - autoPanMargin.x) {
+			mouseDelta.x = (absoluteMousePos.x - (windowSize.x - verticalScrollBarSize - autoPanMargin.x)) * dragFactor;
+		}
+
+		if (absoluteMousePos.y < autoPanMargin.y) {
+			mouseDelta.y = (absoluteMousePos.y - autoPanMargin.y) * dragFactor;
+
+		} else if (absoluteMousePos.y > windowSize.y - horizontalScrollBarSize - autoPanMargin.y) {
+			mouseDelta.y = (absoluteMousePos.y - (windowSize.y - horizontalScrollBarSize - autoPanMargin.y)) * dragFactor;
+		}
+
+		ImGui::SetScrollX(ImGui::GetScrollX() - mouseDelta.x);
+		ImGui::SetScrollY(ImGui::GetScrollY() - mouseDelta.y);
+		ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
+
+	} else if (scrolling) {
+		// handle middle mouse button scrolling
+		float deadzone = glyphSize.x;
+		auto offset = scrollStart - absoluteMousePos;
+		offset.x = (offset.x < 0.0f) ? std::min(offset.x + deadzone, 0.0f) : std::max(offset.x - deadzone, 0.0f);
+		offset.y = (offset.y < 0.0f) ? std::min(offset.y + deadzone, 0.0f) : std::max(offset.y - deadzone, 0.0f);
+
+		float scrollFactor = ImGui::GetIO().DeltaTime * 5.0f;
+		offset *= scrollFactor;
+
+		ImGui::SetScrollX(ImGui::GetScrollX() - offset.x);
+		ImGui::SetScrollY(ImGui::GetScrollY() - offset.y);
+
+		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+			ImGui::IsMouseClicked(ImGuiMouseButton_Middle) ||
+			ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+
+			scrolling = false;
+		}
+
 	// ignore interactions when the editor is not hovered
-	if (ImGui::IsWindowHovered()) {
+	} else if (ImGui::IsWindowHovered()) {
 		auto io = ImGui::GetIO();
-		ImVec2 mousePos = ImGui::GetMousePos() - ImGui::GetCursorScreenPos();
-		ImVec2 absoluteMousePos = ImGui::GetMousePos() - ImGui::GetWindowPos();
+		auto mousePos = ImGui::GetMousePos() - ImGui::GetCursorScreenPos();
 		bool overLineNumbers = showLineNumbers && absoluteMousePos.x > lineNumberLeftOffset && absoluteMousePos.x < lineNumberRightOffset;
 		bool overText = mousePos.x - ImGui::GetScrollX() > textOffset;
 
@@ -886,7 +1028,7 @@ void TextEditor::handleMouseInteractions() {
 			static_cast<int>(std::floor(mousePos.y / glyphSize.y)),
 			static_cast<int>(std::floor((mousePos.x - textOffset) / glyphSize.x))));
 
-				// show text cursor if required
+		// show text cursor if required
 		if (ImGui::IsWindowFocused() && overText) {
 			ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
 		}
@@ -907,12 +1049,15 @@ void TextEditor::handleMouseInteractions() {
 
 			makeCursorVisible();
 
-		} else if (ImGui::IsMouseDragging(ImGuiMouseButton_Middle) && overText) {
-			// pan with dragging middle mouse button
-			ImVec2 mouseDelta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Middle);
-			ImGui::SetScrollX(ImGui::GetScrollX() - mouseDelta.x);
-			ImGui::SetScrollY(ImGui::GetScrollY() - mouseDelta.y);
-			ImGui::ResetMouseDragDelta(ImGuiMouseButton_Middle);
+		} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+			// start panning/scrolling mode on middle mouse click
+			if (panMode) {
+				panning = true;
+
+			} else {
+				scrolling = true;
+				scrollStart = absoluteMousePos;
+			}
 
 		} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
 			// handle right clicks by setting up context menu (if required)
@@ -926,7 +1071,7 @@ void TextEditor::handleMouseInteractions() {
 				ImGui::OpenPopup("TextContextMenu");
 			}
 
-		} else {
+		} else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
 			// handle left mouse button actions
 			auto click = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
 			auto doubleClick = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
@@ -952,7 +1097,7 @@ void TextEditor::handleMouseInteractions() {
 					bool handled = false;
 
 					// select bracketed section (if required)
-					if (Bracketeer::isBracketOpener(codepoint)) {
+					if (CodePoint::isBracketOpener(codepoint)) {
 						auto brackets = bracketeer.getEnclosingBrackets(document.getRight(mouseCoordAbs));
 
 						if (brackets != bracketeer.end()) {
@@ -966,7 +1111,7 @@ void TextEditor::handleMouseInteractions() {
 							handled = true;
 						}
 
-					} else if (Bracketeer::isBracketCloser(codepoint)) {
+					} else if (CodePoint::isBracketCloser(codepoint)) {
 						auto brackets = bracketeer.getEnclosingBrackets(mouseCoordAbs);
 
 						if (brackets != bracketeer.end()) {
@@ -1118,7 +1263,7 @@ void TextEditor::growSelectionsToCurlyBrackets() {
 		auto startCodePoint = document.getCodePoint(document.getLeft(start));
 		auto endCodePoint = document.getCodePoint(end);
 
-		if (startCodePoint == '{' && endCodePoint == '}') {
+		if (startCodePoint == CodePoint::openCurlyBracket && endCodePoint == CodePoint::closeCurlyBracket) {
 			cursor.update(document.getLeft(start),document.getRight(end));
 
 		} else {
@@ -1148,7 +1293,7 @@ void TextEditor::shrinkSelectionsToCurlyBrackets() {
 			auto startCodePoint = document.getCodePoint(start);
 			auto endCodePoint = document.getCodePoint(document.getLeft(end));
 
-			if (startCodePoint == '{' && endCodePoint == '}') {
+			if (startCodePoint == CodePoint::openCurlyBracket && endCodePoint == CodePoint::closeCurlyBracket) {
 				cursor.update(document.getRight(start),document.getLeft(end));
 
 			} else {
@@ -1649,9 +1794,9 @@ void TextEditor::moveTo(Coordinate coordinate, bool select) {
 void TextEditor::handleCharacter(ImWchar character) {
 	auto transaction = startTransaction();
 
-	auto opener = static_cast<char>(character);
-	auto isPaired = !overwrite && completePairedGlyphs && (opener == '{' || opener == '[' || opener == '(' || opener == '"' || opener == '\'');
-	auto closer = opener == '{' ? '}' : (opener == '[' ? ']' : (opener == '(' ? ')' : opener));
+	auto opener = character;
+	auto isPaired = !overwrite && completePairedGlyphs && CodePoint::isPairOpener(opener);
+	auto closer = CodePoint::toPairCloser(opener);
 
 	// ignore input if it was the closing character for a pair that was automatically inserted
 	if (completePairCloser) {
@@ -1671,12 +1816,13 @@ void TextEditor::handleCharacter(ImWchar character) {
 				auto start = cursor->getSelectionStart();
 				auto end = cursor->getSelectionEnd();
 
-				// insert the opening glyph
-				auto end1 = insertText(transaction, end, std::string_view(&closer, 1));
+				// insert the closing glyph
+				char utf8[4];
+				auto end1 = insertText(transaction, end, std::string_view(utf8, CodePoint::write(utf8, closer)));
 				cursors.adjustForInsert(cursor, start, end1);
 
-				// insert the closing glyph
-				auto end2 = insertText(transaction, start, std::string_view(&opener, 1));
+				// insert the opening glyph
+				auto end2 = insertText(transaction, start, std::string_view(utf8, CodePoint::write(utf8, opener)));
 				cursors.adjustForInsert(cursor, start, end2);
 
 				// update old selection
@@ -1686,9 +1832,10 @@ void TextEditor::handleCharacter(ImWchar character) {
 
 	} else if (isPaired) {
 		// insert the requested pair
-		std::string pair(2, 0);
-		pair[0] = opener;
-		pair[1] = closer;
+		char utf8[8];
+		auto size = CodePoint::write(utf8, opener);
+		size += CodePoint::write(utf8 + size, closer);
+		std::string_view pair(utf8, size);
 
 		for (auto cursor = cursors.begin(); cursor < cursors.end(); cursor++) {
 			auto start = cursor->getSelectionStart();
@@ -2183,15 +2330,25 @@ void TextEditor::filterLines(std::function<std::string(std::string_view)> filter
 
 void TextEditor::tabsToSpaces() {
 	filterLines([this](const std::string_view& input) {
-		auto tabSize = document.getTabSize();
+		auto tabSize = static_cast<size_t>(document.getTabSize());
 		std::string output;
+		auto end = input.end();
+		auto i = input.begin();
+		size_t pos = 0;
 
-		for (auto c : input) {
-			if (c == '\t') {
-				output.append(tabSize - (output.size() % tabSize), ' ');
+		while (i < end) {
+			char utf8[4];
+			ImWchar codepoint;
+			i = CodePoint::read(i, end, &codepoint);
+
+			if (codepoint == '\t') {
+				auto spaces = tabSize - (pos % tabSize);
+				output.append(spaces, ' ');
+				pos += spaces;
 
 			} else {
-				output += c;
+				output.append(utf8, CodePoint::write(utf8, codepoint));
+				pos++;
 			}
 		}
 
@@ -2206,18 +2363,24 @@ void TextEditor::tabsToSpaces() {
 
 void TextEditor::spacesToTabs() {
 	FilterLines([this](const std::string_view& input) {
-		auto tabSize = document.getTabSize();
+		auto tabSize = static_cast<size_t>(document.getTabSize());
 		std::string output;
-		int pos = 0;
-		int spaces = 0;
+		auto end = input.end();
+		auto i = input.begin();
+		size_t pos = 0;
+		size_t spaces = 0;
 
-		for (auto c : input) {
-			if (c == ' ') {
+		while (i < end) {
+			char utf8[4];
+			ImWchar codepoint;
+			i = CodePoint::read(i, end, &codepoint);
+
+			if (codepoint == ' ') {
 				spaces++;
 
 			} else {
 				while (spaces) {
-					int spacesUntilNextTab = tabSize - (pos % tabSize);
+					auto spacesUntilNextTab = tabSize - (pos % tabSize);
 
 					if (spacesUntilNextTab == 1) {
 						output += ' ';
@@ -2229,7 +2392,7 @@ void TextEditor::spacesToTabs() {
 						pos += spacesUntilNextTab;
 						spaces -= spacesUntilNextTab;
 
-					} else if (c != '\t')
+					} else if (codepoint != '\t')
 						while (spaces) {
 							output += ' ';
 							pos++;
@@ -2241,12 +2404,12 @@ void TextEditor::spacesToTabs() {
 					}
 				}
 
-				if (c == '\t') {
+				if (codepoint == '\t') {
 					output += '\t';
 					pos += tabSize - (pos % tabSize);
 
 				} else {
-					output += c;
+					output.append(utf8, CodePoint::write(utf8, codepoint));
 					pos++;
 				}
 			}
@@ -2364,12 +2527,14 @@ void TextEditor::autoIndentAllCursors(std::shared_ptr<Transaction> transaction) 
 		auto newCursorIndex = static_cast<int>(whitespace.size());
 
 		// handle special cases
-		if (previousChar == '[' || previousChar == '{') {
+		if (previousChar == CodePoint::openCurlyBracket || previousChar == CodePoint::openSquareBracket) {
 			// add to an existing block
 			insert += "\t";
 			newCursorIndex++;
 
-			if ((previousChar == '[' && nextChar == ']') || (previousChar == '{' && nextChar == '}')) {
+			if ((previousChar == CodePoint::openCurlyBracket && nextChar == CodePoint::closeCurlyBracket) ||
+				(previousChar == CodePoint::openSquareBracket && nextChar == CodePoint::closeSquareBracket)) {
+
 				// open a new block
 				insert += "\n" + whitespace;
 			}
@@ -2781,6 +2946,41 @@ void TextEditor::Document::setText(const std::string_view& text) {
 		} else if (character != '\r') {
 			back().emplace_back(Glyph(character, Color::text));
 		}
+	}
+
+	// update maximum column counts
+	updateMaximumColumn(0, lineCount() - 1);
+}
+
+
+//
+//	TextEditor::Document::setText
+//
+
+void TextEditor::Document::setText(const std::vector<std::string_view>& text) {
+	// reset document
+	clear();
+	updated = true;
+
+	if (text.size()) {
+		// process input UTF-8 and generate lines of glyphs
+		for (auto& line : text) {
+			emplace_back();
+			auto i = line.begin();
+			auto end = line.end();
+
+			while (i < end) {
+				ImWchar character;
+				i = CodePoint::read(i, end, &character);
+
+				if (character != '\r') {
+					back().emplace_back(Glyph(character, Color::text));
+				}
+			}
+		}
+
+	} else {
+		emplace_back();
 	}
 
 	// update maximum column counts
@@ -3470,12 +3670,12 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 				glyph += size;
 
 			// are we starting a single quoted string
-			} else if (language->hasSingleQuotedStrings && glyph->codepoint == '\'') {
+			} else if (language->hasSingleQuotedStrings && glyph->codepoint == CodePoint::singleQuote) {
 				state = State::inSingleQuotedString;
 				(glyph++)->color = Color::string;
 
 			// are we starting a double quoted string
-			} else if (language->hasDoubleQuotedStrings && glyph->codepoint == '"') {
+			} else if (language->hasDoubleQuotedStrings && glyph->codepoint == CodePoint::doubleQuote) {
 				state = State::inDoubleQuotedString;
 				(glyph++)->color = Color::string;
 
@@ -3626,7 +3826,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 					(glyph++)->color = Color::string;
 				}
 
-			} else if (glyph->codepoint == '\'') {
+			} else if (glyph->codepoint == CodePoint::singleQuote) {
 				(glyph++)->color = Color::string;
 				state = State::inText;
 
@@ -3644,7 +3844,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 					(glyph++)->color = Color::string;
 				}
 
-			} else if (glyph->codepoint == '"') {
+			} else if (glyph->codepoint == CodePoint::doubleQuote) {
 				(glyph++)->color = Color::string;
 				state = State::inText;
 
@@ -3779,7 +3979,7 @@ void TextEditor::Bracketeer::update(Document& document) {
 			auto& glyph = document[line][index];
 
 			// handle a "bracket opener" that is not in a comment, string or preprocessor statement
-			if (isBracketCandidate(glyph) && isBracketOpener(glyph.codepoint)) {
+			if (isBracketCandidate(glyph) && CodePoint::isBracketOpener(glyph.codepoint)) {
 				// start a new level
 				levels.emplace_back(size());
 				emplace_back(glyph.codepoint, Coordinate(line, document.getColumn(line, index)), static_cast<ImWchar>(0), Coordinate::invalid(), level);
@@ -3787,13 +3987,13 @@ void TextEditor::Bracketeer::update(Document& document) {
 				level++;
 
 			// handle a "bracket closer" that is not in a comment, string or preprocessor statement
-			} else if (isBracketCandidate(glyph) && isBracketCloser(glyph.codepoint)) {
+			} else if (isBracketCandidate(glyph) && CodePoint::isBracketCloser(glyph.codepoint)) {
 				if (levels.size()) {
 					auto& lastBracket = at(levels.back());
 					levels.pop_back();
 					level--;
 
-					if (lastBracket.startChar == toBracketOpener(glyph.codepoint)) {
+					if (lastBracket.startChar == CodePoint::toPairOpener(glyph.codepoint)) {
 						// handle matching bracket
 						glyph.color = bracketColors[level % 3];
 						lastBracket.endChar = glyph.codepoint;
@@ -3826,7 +4026,7 @@ void TextEditor::Bracketeer::update(Document& document) {
 
 
 //
-//	TextEditor::Bracketeer::getEnclosingCurlyBrackets
+//	TextEditor::Bracketeer::getEnclosingBrackets
 //
 
 TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getEnclosingBrackets(Coordinate location) {
@@ -3863,7 +4063,7 @@ TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getEnclosingCurlyBracke
 			done = true;
 		}
 
-		else if (i->isAround(first) && i->isAround(last) && i->startChar == '{') {
+		else if (i->isAround(first) && i->isAround(last) && i->startChar == CodePoint::openCurlyBracket) {
 			// this could be what we're looking for
 			brackets = i;
 		}
@@ -3888,7 +4088,12 @@ TextEditor::Bracketeer::iterator TextEditor::Bracketeer::getInnerCurlyBrackets(C
 			if (i->level <= outer->level) {
 				done = true;
 
-			} else if (i->level == outer->level + 1 && i->startChar == '{' && i->start > first && i->end < last) {
+			} else if (
+				i->level == outer->level + 1 &&
+				i->startChar == CodePoint::openCurlyBracket &&
+				i->start > first &&
+				i->end < last) {
+
 				brackets = i;
 				done = true;
 			}
