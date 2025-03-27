@@ -161,7 +161,7 @@ public:
 	inline void GetCursor(int& startLine, int& startColumn, int& endLine, int& endColumn, size_t cursor) const { return getCursor(startLine, startColumn, endLine, endColumn, cursor); }
 	inline void GetMainCursor(int& line, int& column) const { return getCursor(line, column, cursors.getMainIndex()); }
 	inline void GetCurrentCursor(int& line, int& column) const { return getCursor(line, column, cursors.getCurrentIndex()); }
-private:
+protected:
 	class Cursor;
 public:
 	inline const Cursor& GetCurrentCursor() { return cursors.getCurrent(); }
