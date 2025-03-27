@@ -43,8 +43,8 @@ void TextDiff::SetText(const std::string_view& left, const std::string_view& rig
 	leftDocument.setText(leftLines);
 	rightDocument.setText(rightLines);
 
-	colorizer.updateEntireDocument(leftDocument, language);
-	colorizer.updateEntireDocument(rightDocument, language);
+	colorizer.updateEntireDocument(leftDocument, language, nullptr);
+	colorizer.updateEntireDocument(rightDocument, language, nullptr);
 
 	// setup line number decoration
 	leftLineNumberDigits = static_cast<int>(std::log10(leftDocument.lineCount() + 1) + 1.0f);
@@ -92,8 +92,8 @@ void TextDiff::SetText(const std::string_view& left, const std::string_view& rig
 
 void TextDiff::SetLanguage(const Language* l) {
 	language = l;
-	colorizer.updateEntireDocument(leftDocument, language);
-	colorizer.updateEntireDocument(rightDocument, language);
+	colorizer.updateEntireDocument(leftDocument, language, nullptr);
+	colorizer.updateEntireDocument(rightDocument, language, nullptr);
 	updated = true;
 }
 
