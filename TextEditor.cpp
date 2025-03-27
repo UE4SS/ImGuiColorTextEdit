@@ -3418,7 +3418,7 @@ void TextEditor::Transactions::redo(Document& document, Cursors& cursors) {
 //	TextEditor::Colorizer::update
 //
 
-TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language, AutoComplete* autoComplete) {
+TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language, AutoComplete* autoComplete, int lineNumber) {
 	auto state = line.state;
 
 	// process all glyphs on this line
@@ -3532,7 +3532,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 
 					} else if (language->declarations.find(identifier) != language->declarations.end()) {
 					    if (autoComplete) {
-					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd);
+					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd, lineNumber);
 					        autoCompleteAlreadyPushed = true;
 					    }
 						color = Color::declaration;
@@ -3667,7 +3667,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
             char utf8[4];
             line_as_string.append(utf8, CodePoint::write(utf8, codepoint));
         }
-        autoComplete->handleLine(line_as_string);
+        autoComplete->handleLine(line_as_string, lineNumber);
     }
 
 	line.colorize = false;
@@ -3681,8 +3681,9 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 
 void TextEditor::Colorizer::updateEntireDocument(Document& document, const Language* language, AutoComplete* autoComplete) {
 	if (language) {
-		for (auto line = document.begin(); line < document.end(); line++) {
-			auto state = update(*line, language, autoComplete);
+	    int lineNumber = 1;
+		for (auto line = document.begin(); line < document.end(); line++, ++lineNumber) {
+			auto state = update(*line, language, autoComplete, lineNumber);
 			auto next = line + 1;
 
 			if (next < document.end()) {
@@ -3708,9 +3709,10 @@ void TextEditor::Colorizer::updateEntireDocument(Document& document, const Langu
 //
 
 void TextEditor::Colorizer::updateChangedLines(Document& document, const Language* language, AutoComplete* autoComplete) {
-	for (auto line = document.begin(); line < document.end(); line++) {
+    int lineNumber = 1;
+	for (auto line = document.begin(); line < document.end(); line++, ++lineNumber) {
 		if (line->colorize) {
-			auto state = update(*line, language, autoComplete);
+			auto state = update(*line, language, autoComplete, lineNumber);
 			auto next = line + 1;
 
 			if (next < document.end() && next->state != state) {

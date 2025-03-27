@@ -43,9 +43,9 @@ public:
     virtual void handleBackspace([[maybe_unused]] std::string_view) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
     virtual void handleIdentifier([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd) {}
-    virtual void handleLine([[maybe_unused]] std::string_view line) {}
+    virtual void handleLine([[maybe_unused]] std::string_view line, [[maybe_unused]] int lineNumber) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
-    virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd) {}
+    virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd, [[maybe_unused]] int lineNumber) {}
     virtual void popScope([[maybe_unused]] ImWchar codepoint) {}
 	virtual bool isAutoCompleteNavEnabled() { return false; }
 };
@@ -759,7 +759,7 @@ private:
 
 	private:
 		// update color in a single line
-		State update(Line& line, const Language* language, AutoComplete* autoComplete);
+		State update(Line& line, const Language* language, AutoComplete* autoComplete, int lineNumber);
 
 		// see if string matches part of line
 		bool matches(Line::iterator start, Line::iterator end, const std::string_view& text);
