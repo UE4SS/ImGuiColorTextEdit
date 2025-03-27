@@ -11,11 +11,11 @@
 ![Maintained](https://img.shields.io/maintenance/yes/2025?style=for-the-badge)
 ![Version](https://img.shields.io/badge/version-0.9-blue?style=for-the-badge)
 
-# ImGuiColorTextEdit
+# Colorizing Text Editor and Text Diff for Dear ImGui
 
 </div>
 
-ImGuiTextEdit is a syntax highlighting text editor for
+TextEdit is a syntax highlighting text editor for
 [Dear ImGui](https://github.com/ocornut/imgui) and it was originally developed by
 [Balázs Jákó](https://github.com/BalazsJako/ImGuiColorTextEdit). Unfortunately, he no
 longer has time to work on the project. In fact, the last update to his repository was
@@ -44,7 +44,7 @@ You can find all text editor source code components here in the
 To respect its origins, this repository will remain a fork (of a fork) although
 there now is little code in common.
 
-![Screenshot](screenshot.png)
+![Screenshot](docs/textEditor.png)
 
 Note: In the screenshot above, the tabs and the menubar are not part of the
 text editor widget. They are part of a custom enclosing IDE (which is part of
@@ -57,7 +57,7 @@ public API to externally implement these features is however included.
 
 - Works on MacOS, Linux and Windows.
 - Has look and feel similar to Visual Studio Code.
-- Works with latest Dear ImGui version (currently v1.91.8) and does not use deprecated functions.
+- Works with latest Dear ImGui version (currently v1.91.9) and does not use deprecated functions.
 - Supports UTF-8 encoding with 16/32 bit codepoints (based on Dear ImGui configuration, see below).
 - Is C++17 based (not unreasonable in 2025 I think) although Dear ImGui still uses C++11.
 - Has no runtime dependencies other than Dear ImGui and the C++17 Standard Template Library (STL).
@@ -67,6 +67,8 @@ public API to externally implement these features is however included.
 - Has find/replace user interface and API with full undo/redo.
 - Find has options for whole word and/or case-sensitive searches.
 - Has Marker API to specify lines and/or line numbers to highlight and optional show tooltips (see [example](docs/markers.md)).
+- Has optional scrollbar minimap to render cursor, selection and marker locations.
+- Provides middle-mouse pan and scroll functions like CAD programs and browsers.
 - Has API to decorate each line (useful for debuggers and IDEs) (see [example](docs/lineDecorator.md)).
 - Provides optional and customizable line number or text right click context menus  (see [example](docs/contextMenus.md))
 - Provides auto completion for paired glyphs (\[, \{, \(, \", \') (can be turned on and off).
@@ -83,6 +85,7 @@ public API to externally implement these features is however included.
 - API to strip trailing whitespaces.
 - Whitespace indicators for tabs and spaces (can be turned on and off).
 - No longer uses regular expressions for colorizing text (see below).
+- Provides an optional companion widget to show source code differences between versions (see below).
 
 ## Integration
 
@@ -90,18 +93,28 @@ As explained above, the editor is developed and maintained as part of a larger p
 In that bigger project, the editor is spread out over multiple source files and some
 of those are automatically generated using tools or derived from datasets (like the
 unicode database). Every time the editor is updated in the bigger project, relevant
-files are concatenated into a simple 2 file distribution which is included here.
+files are concatenated into a simple 2 (or 5 if you also want to use TextDiff)
+file distribution which is included here.
 
 This repository therefore provides a simple mechanism to reuse the editor in any
 Dear ImGui context by doing the following:
 
-- Include the TextEditor.h and TextEditor.cpp files in your project.
+- Include the TextEditor.cpp and TextEditor.h files in your project.
 - Instantiate a TextEditor object for each editor widget you need.
 - Use the public API to set editor options or interact with the editor contents.
 - Call the TextEditor's Render member function every frame in your Dear ImGui loop.
 - If you plan to use non-ASCII characters in your text, see the Unicode section below.
 - Configure Dear ImGui's clipboard functions since that is what this editor uses.
-- For a complete example, please see the [example folder](example/);
+
+If you also want to use the TextDiff widget, you must:
+
+- Include TextDiff.cpp, TextDiff.h and dtl.h in your project.
+- Instantiate a TextDiff object for each diff widget you need.
+- Use the public API to set diff options.
+- Call the TextDiff's Render member function every frame in your Dear ImGui loop.
+- If you properly configured Dear ImGui for the TextEditor (see above), you are good to go.
+
+For a complete example, please see the [example folder](example/).
 
 ## Default Keyboard and Mouse Mappings
 
@@ -122,18 +135,33 @@ Dear ImGui context by doing the following:
 	- Holding down the Alt key with the left or right arrow moves a whole word on MacOS.
 	- Holding down the Ctrl key with the left or right arrow moves a whole word on Linux and Windows.
 
+- Panning and scrolling:
+	- The text scrolls automatically when you move the cursor through keyboard actions.
+	- Mouse actions that extend the selections also apply auto scrolling.
+	- The text in the editor can still be scrolled using those bars that were invented in the 1970's.
+	- Devices with scroll wheels or those that simulated vertical and horizontal scroll wheels (like a touch pad, a mouse with a builtin touch pad or a pen) can also scroll the text. This is actually implemented in Dear ImGui (and used by the editor) and must be supported by your backend.
+	- The middle mouse button on a three-button mouse (or whatever is reported by your OS as a middle mouse button event) enters pan or scroll mode mode depending on the configuration. Pan mode is the default and you can switch this to Scroll mode by calling SetMiddleMouseScrollMode(). Calling SetMiddleMousePanMode() switches it back. The example application uses a menu option to toggle modes.
+	- In pan mode, the text is grabbed and dragged as the cursor moves and as long as the middle mouse button is down.
+	- When you mouse approaches the edges of the editor window, it enters continuous panning mode and the further you move away form the window, the faster it pans.
+	- Panning as described above is typical in CAD or 3D type applications.
+	- In scroll mode, you can release the middle mouse button and scroll the text just like you can in some browsers.
+	- Scroll mode is ended by any clicking any mouse button.
+	- Panning and scrolling operate in opposite directions as they are different paradigms.
+	- An optional indicator (default is on) is shown in the center of the editor window when entering pan/scroll mode. If anybody finds this annoying, it can be turned off through an API by calling SetShowPanScrollIndicatorEnabled(false).
+
 - Cursors and selections:
 	- Alt with single left mouse click creates a new cursor on MacOS.
 	- Ctrl with single left mouse click creates a new cursor on Linux and Windows.
 	- Ctrl-A select all text.
 	- Ctrl-D creates a new cursor and selects the next instance of the current selection.
-	- Double left mouse clicks on a curly bracket selects the content of the relevant block and replaces all previous cursors.
-	- Shift + Double left mouse clicks on a curly bracket selects the content of the relevant block including the brackets and replaces all previous cursors.
-	- Double left mouse clicks not on a bracket or parenthesis, selects a word. Shift extends current selection.
-	- Triple left mouse clicks selects a line. Shift extends current selection.
+	- Double left mouse clicks on a curly bracket select the content of the relevant block and replaces all previous cursors.
+	- Shift + Double left mouse clicks on a curly bracket select the content of the relevant block including the brackets and replaces all previous cursors.
+	- Double left mouse clicks not on a bracket or parenthesis, select a word. Adding Shift extends current selection.
+	- Triple left mouse clicks select a line. Adding Shift extends current selection.
 	- Dragging mouse with left mouse button selects text. Shift extends current selection.
 	- Alt-Shift-RightArrow (on MacOS) and Ctrl-Shift-RightArrow (on Linux and Windows) grows all selections to outer blocks. First just the content of the block, than including the curly brackets. Continuously hitting the key combination keeps growing the selections.
 	- Alt-Shift-LeftArrow (on MacOS) and Ctrl-Shift-LeftArrow (on Linux and Windows) shrinks all selections to inner blocks. First including the curly brackets, that just the content of the block. Continuously hitting the key combination keeps shrinking the selections.
+	- Left mouse clicking or dragging over line numbers select line(s).
 
 - Clipboard Operations:
 	- Ctrl-X or Shift-Delete cuts selected text or current line if no selection.
@@ -165,10 +193,7 @@ Dear ImGui context by doing the following:
 	- Ctrl-g finds next instance of search text.
 
 - Other:
-	- Mouse wheel movements scroll/pan the document.
-	- Middle mouse button and dragging scrolls/pans the document.
 	- Insert key toggles between insert (default) and overwrite modes.
-	- Clicking or dragging over line numbers select line(s).
 
 ## Unicode and UTF-8
 
@@ -181,7 +206,7 @@ processing a lot harder as you constantly have to parse UTF-8 sequences.
 This rewrite internally uses unicode codepoints that are either 16 or 32 bits
 depending on how Dear ImGui is configured. If IMGUI_USE_WCHAR32 is defined,
 Dear ImGui as well as this editor use 32 bits to store a codepoint. If it is not
-defined (which is the default), 16 bits are used for each code point which
+defined (which is the default), 16 bits are used for each codepoint which
 basically limits unicode support to the Basic Multilingual Plane (see
 [this article on Wikipedia](https://en.wikipedia.org/wiki/Plane_(Unicode))).
 
@@ -197,7 +222,7 @@ and set the desired glyphs ranges, please see the
 While this editor relies on [Omar Cornut's Dear ImGui](https://github.com/ocornut/imgui),
 it does not follow the "pure" one widget - one function approach. Since the editor
 has to maintain a relatively complex and large internal state, it did not seem
-to be practical to try and enforce fully immediate mode. It therefore stores
+to be practical to try and enforce full immediate mode. It therefore stores
 its internal state in an object instance which is reused across frames. This
 object is an instance of the TextEditor class which not only stores the
 internal state, it also provides the public API. The "Render" member functions
@@ -209,7 +234,7 @@ The block diagram below shows the architecture of this widget. At the top is
 the public facing TextEditor instance and at the bottom are the private classes
 that store and maintain the internal state.
 
-![Architecture](architecture.png)
+![Architecture](docs/architecture.png)
 
 #### Document
 
@@ -250,7 +275,7 @@ for instance opening a multiline comment at the start of the document,
 causes the entire document to be re-colorized. Luckily the new engine is fast
 enough that you don't notice this and it would only affect a single frame. I
 think it is also important to point out that this widget is not really intended
-for gigabyte size text files. For those, I would still use a regular text
+for mega/gigabyte size text files. For those, I would still use a regular text
 editors.
 
 #### Bracketeer
@@ -276,7 +301,7 @@ for all Dear InGui and the original text editor, all public member functions sta
 with an uppercase letter. Internally, all private member functions and variables
 start with a lowercase letter so it's easy to see what's public and what's private.
 
-In addition to being the public interface, the TextEditor class also is responsible
+In addition to being the public interface, the TextEditor class is also responsible
 for synchronizing the state of the lower levels of the architecture. When for
 instance the user pastes some text, TextEditor ensures that the Document gets
 updated, Cursors get adjusted (if required), Transaction records are created (so
@@ -285,6 +310,26 @@ informed of the changes.
 
 The final responsibility of the TextEditor class is rendering and user input
 (keyboard and mouse) processing.
+
+#### TextDiff
+
+TextDiff is a separate widget that is derived from TextEditor which allows
+you to show the differences between two versions of some code while preserving color
+highlighting. The code for this widget is in separate files (see integration above)
+so it is optional. TextDiff is readonly and has two modes:
+
+- **Integrated view** where differences are depicted vertically using the standard "diff" look and feel. This view is implemented as a read-only TextEditor with markings and a line decorator which means that functions like text select and copy are available. This is the default view.
+
+- **Side-by-side view** where the original and altered versions are shown/compared side-by-side. This a a custom static view that does not have the usual TextEditor features like text select or copy. Scrolling however is available.
+
+In both modes, the provided text can be colored based on a specified language and
+color palette like in the TextEditor. The background colors for the difference
+highlighting are not part of the palette but can still be changed through a the public API.
+
+Below are two screenshots of its use in both modes. Have a look at the code in the [example application](example/) to see how easy it is to use this TextDiff widget.
+
+![Screenshot 2](docs/textDiffCombined.png)
+![Screenshot 3](docs/textDiffSideBySide.png)
 
 ## Issues
 
@@ -313,7 +358,14 @@ all the issues on the original and the fork but I think I have better use for my
 time. If you believe you deserve credit here, please raise an issue with reference
 to your work. I'll gladly add it.
 
+For the Text Diff widget, credit goes to [Tatsuhiko Kubo (cubicdaiya)](https://github.com/cubicdaiya)
+for his [Diff Template Library (DTL)](https://github.com/cubicdaiya/dtl) which is
+released under the BSD License.
+
 ## License
 
 This work is licensed under the terms of the MIT license.
 For a copy, see <https://opensource.org/licenses/MIT>.
+
+The included DTL library (which is only used in the Diff Widget) is released under the
+[BSD license](https://github.com/cubicdaiya/dtl/blob/master/COPYING).
