@@ -38,6 +38,15 @@ void TextEditor::setText(const std::string_view &text) {
 
 
 //
+//	TextEditor::setFile
+//
+
+void TextEditor::setFile(const std::filesystem::path &file) {
+	document.setFile(file);
+}
+
+
+//
 //	TextEditor::render
 //
 
@@ -2999,6 +3008,15 @@ void TextEditor::Document::setText(const std::vector<std::string_view>& text) {
 
 
 //
+//	TextEditor::Document::setFile
+//
+
+void TextEditor::Document::setFile(const std::filesystem::path& file) {
+    this->file = file;
+}
+
+
+//
 //	TextEditor::Document::insertText
 //
 
@@ -3116,6 +3134,15 @@ std::string TextEditor::Document::getText() const {
 	}
 
 	return text;
+}
+
+
+//
+//	TextEditor::Document::getFile
+//
+
+const std::filesystem::path& TextEditor::Document::getFile() const {
+    return file;
 }
 
 
@@ -3628,7 +3655,7 @@ void TextEditor::Transactions::redo(Document& document, Cursors& cursors) {
 //	TextEditor::Colorizer::update
 //
 
-TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language, AutoComplete* autoComplete, int lineNumber) {
+TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* language, AutoComplete* autoComplete, int lineNumber, const std::filesystem::path& file) {
 	auto state = line.state;
 
 	// process all glyphs on this line
@@ -3742,7 +3769,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 
 					} else if (language->declarations.find(identifier) != language->declarations.end()) {
 					    if (autoComplete) {
-					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd, lineNumber);
+					        autoComplete->pushScope(identifier, &tokenEnd, &lineEnd, lineNumber, file);
 					        autoCompleteAlreadyPushed = true;
 					    }
 						color = Color::declaration;
@@ -3877,7 +3904,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
             char utf8[4];
             line_as_string.append(utf8, CodePoint::write(utf8, codepoint));
         }
-        autoComplete->handleLine(line_as_string, lineNumber);
+        autoComplete->handleLine(line_as_string, lineNumber, file);
     }
 
 	line.colorize = false;
@@ -3893,7 +3920,7 @@ void TextEditor::Colorizer::updateEntireDocument(Document& document, const Langu
 	if (language) {
 	    int lineNumber = 1;
 		for (auto line = document.begin(); line < document.end(); line++, ++lineNumber) {
-			auto state = update(*line, language, autoComplete, lineNumber);
+			auto state = update(*line, language, autoComplete, lineNumber, document.getFile());
 			auto next = line + 1;
 
 			if (next < document.end()) {
@@ -3922,7 +3949,7 @@ void TextEditor::Colorizer::updateChangedLines(Document& document, const Languag
     int lineNumber = 1;
 	for (auto line = document.begin(); line < document.end(); line++, ++lineNumber) {
 		if (line->colorize) {
-			auto state = update(*line, language, autoComplete, lineNumber);
+			auto state = update(*line, language, autoComplete, lineNumber, document.getFile());
 			auto next = line + 1;
 
 			if (next < document.end() && next->state != state) {

@@ -21,6 +21,7 @@
 #include <string_view>
 #include <unordered_set>
 #include <vector>
+#include <filesystem>
 
 #include "imgui.h"
 
@@ -43,9 +44,9 @@ public:
     virtual void handleBackspace([[maybe_unused]] std::string_view) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
     virtual void handleIdentifier([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd) {}
-    virtual void handleLine([[maybe_unused]] std::string_view line, [[maybe_unused]] int lineNumber) {}
+    virtual void handleLine([[maybe_unused]] std::string_view line, [[maybe_unused]] int lineNumber, [[maybe_unused]] const std::filesystem::path& file) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
-    virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd, [[maybe_unused]] int lineNumber) {}
+    virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd, [[maybe_unused]] int lineNumber, [[maybe_unused]] const std::filesystem::path& file) {}
     virtual void popScope([[maybe_unused]] ImWchar codepoint) {}
 	virtual bool isAutoCompleteNavEnabled() { return false; }
 	virtual void closeAutoCompleteNav() {}
@@ -101,6 +102,7 @@ public:
 	// access text (using UTF-8 encoded strings)
 	// (see note below on cursor and scroll manipulation after setting new text)
 	inline void SetText(const std::string_view& text) { setText(text); }
+	inline void SetFile(const std::filesystem::path& file) { setFile(file); }
 	inline std::string GetText() const { return document.getText(); }
 	inline std::string GetCursorText(size_t cursor) const { return getCursorText(cursor); }
 
@@ -709,11 +711,13 @@ protected:
 		// manipulate document text (strings should be UTF-8 encoded)
 		void setText(const std::string_view& text);
 		void setText(const std::vector<std::string_view>& text);
+		void setFile(const std::filesystem::path& file);
 		Coordinate insertText(Coordinate start, const std::string_view& text);
 		void deleteText(Coordinate start, Coordinate end);
 
 		// access document text (strings are UTF-8 encoded)
 		std::string getText() const;
+		const std::filesystem::path& getFile() const;
 		std::string getLineText(int line) const;
 		std::string getSectionText(Coordinate start, Coordinate end) const;
 		ImWchar getCodePoint(Coordinate location);
@@ -764,6 +768,7 @@ protected:
 		int tabSize = 4;
 		int maxColumn = 0;
 		bool updated = false;
+		std::filesystem::path file{};
 	} document;
 
 	// single action to be performed on text as part of a larger transaction
@@ -846,7 +851,7 @@ protected:
 
 	private:
 		// update color in a single line
-		State update(Line& line, const Language* language, AutoComplete* autoComplete, int lineNumber);
+		State update(Line& line, const Language* language, AutoComplete* autoComplete, int lineNumber, const std::filesystem::path& file);
 
 		// see if string matches part of line
 		bool matches(Line::iterator start, Line::iterator end, const std::string_view& text);
@@ -894,6 +899,7 @@ protected:
 
 	// access the editor's text
 	void setText(const std::string_view& text);
+	void setFile(const std::filesystem::path& file);
 	void clearText();
 
 	// render (parts of) the text editor
@@ -1096,4 +1102,5 @@ protected:
 public:
 	template <typename AutoCompleteType>
 	inline void SetAutoComplete() { autoComplete = std::make_unique<AutoCompleteType>(); }
+	inline AutoComplete* GetAutoComplete() const { return autoComplete.get(); }
 };
