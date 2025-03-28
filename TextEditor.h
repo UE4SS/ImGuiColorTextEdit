@@ -47,7 +47,7 @@ public:
     virtual void handleLine([[maybe_unused]] std::string_view line, [[maybe_unused]] int lineNumber, [[maybe_unused]] const std::filesystem::path& file) {}
 	// The second and third params are void* because there's no possible way to refer to 'TextEditor::Iterator' here.
     virtual void pushScope([[maybe_unused]] std::string_view identifier, [[maybe_unused]] void* tokenEnd, [[maybe_unused]] void* lineEnd, [[maybe_unused]] int lineNumber, [[maybe_unused]] const std::filesystem::path& file) {}
-    virtual void popScope([[maybe_unused]] ImWchar codepoint) {}
+    virtual void popScope([[maybe_unused]] ImWchar codepoint, [[maybe_unused]] int lineNumber, [[maybe_unused]] const std::filesystem::path& file) {}
 	virtual bool isAutoCompleteNavEnabled() { return false; }
 	virtual void closeAutoCompleteNav() {}
 };

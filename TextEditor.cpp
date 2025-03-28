@@ -3791,7 +3791,7 @@ TextEditor::State TextEditor::Colorizer::update(Line& line, const Language* lang
 				// is this punctuation
 				} else if (language->isPunctuation && language->isPunctuation(glyph->codepoint)) {
 				    if (autoComplete) {
-				        autoComplete->popScope(glyph->codepoint);
+				        autoComplete->popScope(glyph->codepoint, lineNumber, file);
 				    }
 					(glyph++)->color = Color::punctuation;
 
